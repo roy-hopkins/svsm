@@ -10,8 +10,9 @@ STAGE2_ELF = "target/svsm-target/${TARGET_PATH}/stage2"
 KERNEL_ELF = "target/svsm-target/${TARGET_PATH}/svsm"
 
 STAGE1_OBJS = stage1/stage1.o stage1/reset.o
+SVSM_CODE_OBJS = ovmf/ovmf.o stage1/stage1.o stage1/reset.o
 
-all: svsm.bin
+all: svsm.bin ovmf/SVSM_CODE.fd
 
 test:
 	cd src/
@@ -43,8 +44,23 @@ stage1/stage1: ${STAGE1_OBJS}
 svsm.bin: stage1/stage1
 	objcopy -O binary $< $@
 
+ovmf/OVMF_CODE.fd: edk2/OvmfPkg/OvmfPkgX64.dsc
+	scripts/build-ovmf.sh
+
+ovmf/ovmf.bin: ovmf/OVMF_CODE.fd
+	cp $< $@
+	truncate --size=-8K $@
+ovmf/ovmf.o: ovmf/ovmf.bin
+	objcopy -O elf64-x86-64 -B i386 -I binary --rename-section .data=.ovmf $< $@
+
+ovmf/SVSM_CODE.o: ${SVSM_CODE_OBJS}
+	$(CC) -o $@ $(SVSM_CODE_OBJS) -nostdlib -Wl,--build-id=none -Wl,-Tovmf/svsm_ovmf.lds
+
+ovmf/SVSM_CODE.fd: ovmf/SVSM_CODE.o
+	objcopy -O binary $< $@
+
 clean:
 	cargo clean
-	rm -f stage1/stage2.bin svsm.bin stage1/meta.bin ${STAGE1_OBJS} gen_meta
+	rm -f stage1/stage2.bin svsm.bin stage1/meta.bin ${STAGE1_OBJS} gen_meta ${SVSM_CODE_OBJS} ovmf/OVMF_CODE.fd ovmf/ovmf.bin ovmf/ovmf.o ovmf/SVSM_CODE.o ovmf/SVSM_CODE.fd
 
 .PHONY: stage1/stage2.bin stage1/kernel.bin svsm.bin clean

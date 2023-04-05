@@ -2,6 +2,7 @@
 *.bin
 *.elf
 *.swp
+*.fd
 *~
 target/
 gen_meta

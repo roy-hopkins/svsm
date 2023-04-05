@@ -1,0 +1,28 @@
+diff --git a/OvmfPkg/Include/Fdf/OvmfPkgDefines.fdf.inc b/OvmfPkg/Include/Fdf/OvmfPkgDefines.fdf.inc
+index 6170c5993c..06f735b3fc 100644
+--- a/OvmfPkg/Include/Fdf/OvmfPkgDefines.fdf.inc
++++ b/OvmfPkg/Include/Fdf/OvmfPkgDefines.fdf.inc
+@@ -67,6 +67,23 @@ DEFINE SECFV_OFFSET      = 0x003CC000
+ DEFINE SECFV_SIZE        = 0x34000
+ !endif
+ 
++!if $(FD_SVSM)
++DEFINE VARS_SIZE         = 0x84000
++DEFINE VARS_BLOCKS       = 0x84
++DEFINE VARS_LIVE_SIZE    = 0x40000
++DEFINE VARS_SPARE_SIZE   = 0x42000
++
++DEFINE FW_BASE_ADDRESS   = 0xFFC00000
++DEFINE FW_SIZE           = 0x003FF000
++DEFINE FW_BLOCKS         = 0x3ff
++DEFINE CODE_BASE_ADDRESS = 0xFFC84000
++DEFINE CODE_SIZE         = 0x0037C000
++DEFINE CODE_BLOCKS       = 0x37C
++DEFINE FVMAIN_SIZE       = 0x00348000
++DEFINE SECFV_OFFSET      = 0x003CC000
++DEFINE SECFV_SIZE        = 0x33000
++!endif
++
+ SET gUefiOvmfPkgTokenSpaceGuid.PcdOvmfFdBaseAddress     = $(FW_BASE_ADDRESS)
+ SET gUefiOvmfPkgTokenSpaceGuid.PcdOvmfFirmwareFdSize    = $(FW_SIZE)
+ SET gUefiOvmfPkgTokenSpaceGuid.PcdOvmfFirmwareBlockSize = $(BLOCK_SIZE)
