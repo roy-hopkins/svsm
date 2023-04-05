@@ -49,7 +49,6 @@ ovmf/OVMF_CODE.fd: edk2/OvmfPkg/OvmfPkgX64.dsc
 
 ovmf/ovmf.bin: ovmf/OVMF_CODE.fd
 	cp $< $@
-	truncate --size=-8K $@
 ovmf/ovmf.o: ovmf/ovmf.bin
 	objcopy -O elf64-x86-64 -B i386 -I binary --rename-section .data=.ovmf $< $@
 
