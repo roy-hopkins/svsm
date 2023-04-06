@@ -29,8 +29,12 @@ SECTIONS
 	.ovmf : { *(.ovmf) }
 
 	. = 0xfffff000;
+	ovmfgdt = .;
 	.sinit = .;
 	.init . : {
+		/*
+		 * OVMF GDT is expected to be at 0xfffff000
+		 */
 		*(.ovmfgdt);
 		. = 4096 - 512;
 		*(.init);

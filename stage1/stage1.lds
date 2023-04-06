@@ -32,15 +32,20 @@ SECTIONS
 	.bss . : { *(.bss) }
 	edata = .;
 
-	. = 0xfffffe00;
+	. = 0xfffff000;
 	.sinit = .;
 	.init . : {
+		/*
+		 * OVMF GDT is expected to be at 0xfffff000
+		 */
+		*(.ovmfgdt);
+		. = 4096 - 512;
 		*(.init);
-		. = 512 - 32 - 256;
+		. = 4096 - 32 - 256;
 		*(.sevmeta);
-		. = 512 - 16;
+		. = 4096 - 16;
 		*(.resetvector);
-		. = 512;
+		. = 4096;
 	}
 	einit = .;
 

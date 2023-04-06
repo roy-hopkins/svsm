@@ -95,7 +95,7 @@ fn strip_c_bit(paddr: PhysAddr) -> PhysAddr {
     paddr & !encrypt_mask()
 }
 
-fn set_c_bit(paddr: PhysAddr) -> PhysAddr {
+pub fn set_c_bit(paddr: PhysAddr) -> PhysAddr {
     paddr | encrypt_mask()
 }
 

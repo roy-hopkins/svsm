@@ -10,7 +10,7 @@ STAGE2_ELF = "target/svsm-target/${TARGET_PATH}/stage2"
 KERNEL_ELF = "target/svsm-target/${TARGET_PATH}/svsm"
 
 STAGE1_OBJS = stage1/stage1.o stage1/reset.o
-SVSM_CODE_OBJS = ovmf/ovmf.o stage1/stage1.o stage1/reset.o
+SVSM_CODE_OBJS = ovmf/ovmf.o stage1/stage1.o stage1/reset.o stage1/ovmfgdt.o
 
 all: svsm.bin ovmf/SVSM_CODE.fd
 
@@ -37,6 +37,7 @@ stage1/kernel.bin:
 
 stage1/stage1.o: stage1/stage1.S stage1/stage2.bin stage1/kernel.bin
 stage1/reset.o:  stage1/reset.S stage1/meta.bin
+stage1/ovmfgdt.o:  stage1/ovmfgdt.S
 
 stage1/stage1: ${STAGE1_OBJS}
 	$(CC) -o $@ $(STAGE1_OBJS) -nostdlib -Wl,--build-id=none -Wl,-Tstage1/stage1.lds

@@ -9,7 +9,6 @@ extern crate alloc;
 use super::gdt::load_tss;
 use super::tss::{X86Tss, IST_DF};
 use crate::cpu::tss::TSS_LIMIT;
-use crate::cpu::vmsa::init_guest_vmsa;
 use crate::error::SvsmError;
 use crate::locking::{LockGuard, RWLock, SpinLock};
 use crate::mm::alloc::{allocate_page, allocate_zeroed_page};
@@ -414,16 +413,12 @@ impl PerCpu {
         unsafe { (SVSM_PERCPU_VMSA_BASE as *mut VMSA).as_mut().unwrap() }
     }
 
-    pub fn alloc_guest_vmsa(&mut self) -> Result<(), SvsmError> {
+    pub fn alloc_guest_vmsa(&mut self) -> Result<VirtAddr, SvsmError> {
         let vaddr = allocate_new_vmsa(RMPFlags::GUEST_VMPL)?;
         let paddr = virt_to_phys(vaddr);
-
-        let vmsa = VMSA::from_virt_addr(vaddr);
-        init_guest_vmsa(vmsa, self.reset_ip);
-
         self.update_guest_vmsa(paddr);
 
-        Ok(())
+        Ok(vaddr)
     }
 
     pub fn unmap_caa(&self) {

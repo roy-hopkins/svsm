@@ -8,6 +8,8 @@
 
 pub mod ovmf_meta;
 pub mod ovmf_fw;
+pub mod ffs;
+pub mod sec;
 
 pub use ovmf_meta::{parse_ovmf_meta_data, validate_ovmf_memory, print_ovmf_meta, SevOVMFMetaData};
 pub use ovmf_fw::OvmfFw;
