@@ -3,7 +3,7 @@
 /*
  * Copyright (c) 2022-2023 SUSE LLC
  *
- * Author: Roy Hopkins <rhopkins@suse.com>
+ * Author: Roy Hopkins <roy.hopkins@suse.com>
  */
 
 OUTPUT_ARCH(i386:x86-64)
@@ -28,17 +28,15 @@ SECTIONS
 	. = .sovmf;
 	.ovmf : { *(.ovmf) }
 
-	. = 0xfffff000;
+	. = 0xfffffe00;
 	.sinit = .;
 	.init . : {
-		*(.ovmfgdt);
-		. = 4096 - 512;
 		*(.init);
-		. = 4096 - 32 - 256;
+		. = 512 - 32 - 256;
 		*(.sevmeta);
-		. = 4096 - 16;
+		. = 512 - 16;
 		*(.resetvector);
-		. = 4096;
+		. = 512;
 	}
 	einit = .;
 

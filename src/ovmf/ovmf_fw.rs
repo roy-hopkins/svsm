@@ -11,6 +11,8 @@ use crate::error::SvsmError;
 
 use super::{SevOVMFMetaData, parse_ovmf_meta_data, print_ovmf_meta, validate_ovmf_memory};
 
+const OVMF_ENTRY: PhysAddr = 0xffffeff0;
+
 pub struct OvmfFw {
     ovmf_meta: SevOVMFMetaData
 }
@@ -51,11 +53,12 @@ impl OvmfFw {
     pub fn prepare_launch(self: &Self) -> Result<(), SvsmError> {
         let caa = self.ovmf_meta.caa_page.unwrap();
         let cpu = this_cpu_mut();
+        cpu.set_reset_ip(OVMF_ENTRY as u64);
     
         cpu.alloc_guest_vmsa()?;
         cpu.update_guest_caa(caa);
         update_mappings()?;
-    
+
         Ok(())
     }
 
