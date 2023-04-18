@@ -28,7 +28,7 @@ pub fn find_bfv_base() -> Result<(PhysAddr, usize), SvsmError> {
     let mut result: Result<(PhysAddr, usize), SvsmError> = Err(SvsmError::Firmware);
 
     while paddr >= pend {
-        let guard = PerCPUPageMappingGuard::create(paddr, 0, false)?;
+        let guard = PerCPUPageMappingGuard::create_4k(paddr)?;
         let vaddr = guard.virt_addr();
 
         unsafe {

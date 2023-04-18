@@ -34,6 +34,7 @@ use svsm::mm::alloc::{memory_info, print_memory_info, root_mem_init};
 use svsm::mm::memory::init_memory_map;
 use svsm::mm::pagetable::paging_init;
 use svsm::mm::{init_kernel_mapping_info, PerCPUPageMappingGuard};
+use svsm::mm::virtualrange::virt_range_init;
 use svsm::requests::request_loop;
 use svsm::serial::SerialPort;
 use svsm::serial::SERIAL_PORT;
@@ -122,7 +123,7 @@ static LAUNCH_INFO: ImmutAfterInitCell<KernelLaunchInfo> = ImmutAfterInitCell::u
 pub static mut PERCPU: PerCpu = PerCpu::new();
 
 fn copy_cpuid_table_to_fw(fw_addr: PhysAddr) -> Result<(), SvsmError> {
-    let guard = PerCPUPageMappingGuard::create(fw_addr, 0, false)?;
+    let guard = PerCPUPageMappingGuard::create_4k(fw_addr)?;
     let start = guard.virt_addr();
     let end = start + PAGE_SIZE;
 
@@ -141,7 +142,7 @@ fn copy_cpuid_table_to_fw(fw_addr: PhysAddr) -> Result<(), SvsmError> {
 }
 
 fn copy_secrets_page_to_fw(fw_addr: PhysAddr, caa_addr: PhysAddr) -> Result<(), SvsmError> {
-    let guard = PerCPUPageMappingGuard::create(fw_addr, 0, false)?;
+    let guard = PerCPUPageMappingGuard::create_4k(fw_addr)?;
     let start = guard.virt_addr();
 
     let mut target = ptr::NonNull::new(start as *mut SecretsPage).unwrap();
@@ -178,7 +179,7 @@ fn copy_secrets_page_to_fw(fw_addr: PhysAddr, caa_addr: PhysAddr) -> Result<(), 
 }
 
 fn zero_caa_page(fw_addr: PhysAddr) -> Result<(), SvsmError> {
-    let guard = PerCPUPageMappingGuard::create(fw_addr, 0, false)?;
+    let guard = PerCPUPageMappingGuard::create_4k(fw_addr)?;
     let vaddr = guard.virt_addr();
 
     zero_mem_region(vaddr, vaddr + PAGE_SIZE);
@@ -237,7 +238,7 @@ fn validate_flash() -> Result<(), SvsmError> {
         );
 
         for paddr in (pstart..pend).step_by(PAGE_SIZE) {
-            let guard = PerCPUPageMappingGuard::create(paddr, 0, false)?;
+            let guard = PerCPUPageMappingGuard::create_4k(paddr)?;
             let vaddr = guard.virt_addr();
             if let Err(e) = rmp_adjust(vaddr, RMPFlags::GUEST_VMPL | RMPFlags::RWX, false) {
                 log::info!("rmpadjust failed for addr {:#018x}", vaddr);
@@ -322,6 +323,8 @@ pub extern "C" fn svsm_start(li: &KernelLaunchInfo, vb_addr: VirtAddr) {
 
     paging_init();
     init_page_table(&launch_info);
+
+    virt_range_init();
 
     unsafe {
         let bsp_percpu = PerCpu::alloc(0)

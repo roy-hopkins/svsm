@@ -8,9 +8,10 @@
 use core::mem::size_of;
 
 use crate::error::SvsmError;
+use crate::mm::virtualrange::VIRT_ALIGN_4K;
 use crate::utils::Uuid;
 use crate::types::PhysAddr;
-use crate::mm::{PerCPUPageMappingGuard, PAGE_SIZE, PAGE_SIZE_2M};
+use crate::mm::{PerCPUPageMappingGuard, PAGE_SIZE};
 
 pub struct FirmwareVolumeHeader {
     pub zero_vector: [u8; 16],
@@ -133,7 +134,7 @@ impl FirmwareFileSystem {
     }
 
     pub fn valid(self: &mut Self) -> Result<(), SvsmError> {
-        let guard = PerCPUPageMappingGuard::create(self.phys_fv, 0, false)?;
+        let guard = PerCPUPageMappingGuard::create_4k(self.phys_fv)?;
         let vaddr = guard.virt_addr();
         let volume = vaddr as *const FirmwareVolumeHeader;
 
@@ -205,13 +206,12 @@ impl FirmwareFile {
         if fv.within(phys_addr + ffh_size).is_err() {
             return Err(SvsmError::Firmware);
         }
-        // FIXME: The (extended) file header might traverse a page boundary. This will _always_
-        // cause a panic on startup if the OVMF image does generate a file that traverses the
-        // boundary so it will be apparent if this is the case. Use a 2M page to minimise the likelihood.
-        let page = phys_addr & !(PAGE_SIZE_2M - 1);
-        let guard = PerCPUPageMappingGuard::create(page, 0, true)?;
+        // Map the entire file header into the virtual address space
+        let start_page = phys_addr & !(PAGE_SIZE - 1);
+        let end_page = (phys_addr + ffh_size + (PAGE_SIZE - 1)) & !(PAGE_SIZE - 1);
+        let guard = PerCPUPageMappingGuard::create(start_page, end_page, VIRT_ALIGN_4K)?;
         let mut vaddr = guard.virt_addr();
-        vaddr += phys_addr - page;
+        vaddr += phys_addr - start_page;
 
         unsafe {
             let file_ptr = vaddr as *const FirmwareFileHeader;
@@ -275,7 +275,7 @@ impl FirmwareFile {
             // traverse a page boundary.
             assert!((phys_section & 0x3) == 0);
             let page = phys_section & !(PAGE_SIZE-1);
-            let guard = PerCPUPageMappingGuard::create(page, 0, false)?;
+            let guard = PerCPUPageMappingGuard::create_4k(page)?;
             let vaddr = guard.virt_addr();
     
             let section_header = (vaddr + (phys_section - page)) as *const SectionHeader;
@@ -308,15 +308,13 @@ impl FirmwareFile {
             return Err(SvsmError::Firmware);
         }
 
-        // FIXME: There is no guarantee that the header will be completely contained in a single page. We
-        // use a 2M page to minimise the likelihood of page traversal but it is not guaranteed. It is 
-        // dependent purely on the OVMF build and will be detected by a panic during startup if a page
-        // boundary is traversed.
-        let page = phys_section & !(PAGE_SIZE_2M - 1);
-        let guard = PerCPUPageMappingGuard::create(page, 0, true)?;
+        // Map the entire file header into the virtual address space
+        let start_page = phys_section & !(PAGE_SIZE - 1);
+        let end_page = (phys_section + section_size + (PAGE_SIZE - 1)) & !(PAGE_SIZE - 1);
+        let guard = PerCPUPageMappingGuard::create(start_page, end_page, VIRT_ALIGN_4K)?;
         let vaddr = guard.virt_addr();
 
-        let virt_section = vaddr + (phys_section - page);
+        let virt_section = vaddr + (phys_section - start_page);
         
         // Check for the MSDOS header.
         unsafe {
@@ -332,7 +330,7 @@ impl FirmwareFile {
             }
             // Check that the offset fits in our page range.
             let phys_pe_section_header = phys_section + pe_header_offset as usize;
-            if (phys_pe_section_header + sh_size) > (page + PAGE_SIZE_2M) {
+            if (phys_pe_section_header + sh_size) > end_page {
                 panic!("SEC PE32+ file contains a Pe32SectionHeader that exceeds the mapped page limit.");
             }
 

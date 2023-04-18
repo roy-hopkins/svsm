@@ -134,22 +134,21 @@ impl OvmfFw {
     
         // Clear the page table memory.
         for pt_page in 0..(PAGE_TABLE_SIZE / PAGE_SIZE) {
-            let guard = PerCPUPageMappingGuard::create(MEMFD_BASE_ADDRESS 
-                                            + (pt_page * PAGE_SIZE), 0, false)?;
+            let guard = PerCPUPageMappingGuard::create_4k(MEMFD_BASE_ADDRESS + (pt_page * PAGE_SIZE))?;
             let vaddr = guard.virt_addr();
             zero_mem_region(vaddr, vaddr + PAGE_SIZE);
         }
     
         // Top level page directory pointers (1 * 512GB entry)
         unsafe {
-            let guard = PerCPUPageMappingGuard::create(MEMFD_BASE_ADDRESS, 0, false)?;
+            let guard = PerCPUPageMappingGuard::create_4k(MEMFD_BASE_ADDRESS)?;
             let p = guard.virt_addr() as *mut u64;
             p.write((set_c_bit(MEMFD_BASE_ADDRESS + 0x1000) + page_pdp_attr.bits() as PhysAddr) as u64);
         }
     
         // Next level page directory pointers (4 * 1GB entries => 4GB)
         unsafe {
-            let guard = PerCPUPageMappingGuard::create(MEMFD_BASE_ADDRESS + 0x1000, 0, false)?;
+            let guard = PerCPUPageMappingGuard::create_4k(MEMFD_BASE_ADDRESS + 0x1000)?;
             let p = guard.virt_addr() as *mut u64;
             for offset in 0..4 {
                 p.offset(offset).write(
@@ -161,9 +160,8 @@ impl OvmfFw {
         // Page table entries (2048 * 2MB entries => 4GB)
         unsafe {
             for page in 0..4 {
-                let guard = PerCPUPageMappingGuard::create(
-                                MEMFD_BASE_ADDRESS + 0x2000 + (page as PhysAddr * 0x1000), 
-                                0, false)?;
+                let guard = PerCPUPageMappingGuard::create_4k(
+                    MEMFD_BASE_ADDRESS + 0x2000 + (page as PhysAddr * 0x1000))?;
                 let p = guard.virt_addr() as *mut u64;
 
                 for entry in 0..0x200 {
@@ -190,14 +188,14 @@ impl OvmfFw {
     
         unsafe {
             // Switch from 2MB to 4K pages for the range containing the GHCB
-            let guard = PerCPUPageMappingGuard::create(MEMFD_BASE_ADDRESS + 0x2000, 0, false)?;
+            let guard = PerCPUPageMappingGuard::create_4k(MEMFD_BASE_ADDRESS + 0x2000)?;
             let p = guard.virt_addr() as *mut u64;
             let addr = set_c_bit(GHCB_PT_ADDR);
             p.offset((GHCB_BASE as isize) >> 21).write((addr + page_pdp_attr.bits() as PhysAddr) as u64);
         }
         unsafe {
             // Create the 4K entries
-            let guard = PerCPUPageMappingGuard::create(GHCB_PT_ADDR as PhysAddr, 0, false)?;
+            let guard = PerCPUPageMappingGuard::create_4k(GHCB_PT_ADDR as PhysAddr)?;
             let p = guard.virt_addr() as *mut u64;
             for entry in 0..0x200 {
                 let addr = ((entry as PhysAddr) << 12) + (GHCB_BASE & 0xffe0_0000) as PhysAddr;
@@ -215,7 +213,7 @@ impl OvmfFw {
      */
     pub fn prepare_work_area()  -> Result<(), SvsmError> {
         let work_area_phys: PhysAddr = WORK_AREA;
-        let guard = PerCPUPageMappingGuard::create(work_area_phys, 0, false)?;
+        let guard = PerCPUPageMappingGuard::create_4k(work_area_phys)?;
         let work_area = guard.virt_addr();
     
         zero_mem_region(work_area, work_area + 0x1000);
