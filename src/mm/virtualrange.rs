@@ -30,7 +30,8 @@ impl VirtualRange {
     }
 
     pub fn map_pages(self: &mut Self, page_count: usize, alignment: usize) -> Result<VirtAddr, SvsmError> {
-        match self.bits.alloc(page_count, alignment) {
+        // Always reserve an extra page to leave a guard between virtual memory allocations
+        match self.bits.alloc(page_count + 1, alignment) {
             Some(offset) => Ok(self.start_virt + (offset << PAGE_SHIFT)),
             None => Err(SvsmError::Mem)
         }
@@ -38,7 +39,8 @@ impl VirtualRange {
 
     pub fn unmap_pages(self: &mut Self, vaddr: VirtAddr, page_count: usize) {
         let offset = (vaddr - self.start_virt) >> PAGE_SHIFT;
-        self.bits.free(offset, page_count);
+        // Add 1 to the page count for the VM guard
+        self.bits.free(offset, page_count + 1);
     }
 
     pub fn used_pages(&self) -> usize {
