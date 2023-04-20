@@ -34,7 +34,7 @@ use svsm::mm::alloc::{memory_info, print_memory_info, root_mem_init};
 use svsm::mm::memory::init_memory_map;
 use svsm::mm::pagetable::paging_init;
 use svsm::mm::{init_kernel_mapping_info, PerCPUPageMappingGuard};
-use svsm::mm::virtualrange::virt_range_init;
+use svsm::mm::virtualrange::{virt_range_init, virt_log_usage};
 use svsm::requests::request_loop;
 use svsm::serial::SerialPort;
 use svsm::serial::SERIAL_PORT;
@@ -400,6 +400,8 @@ pub extern "C" fn svsm_main() {
     }
 
     fw.prepare_launch().expect("Failed to setup guest VMSA");
+
+    virt_log_usage();
 
     if let Err(e) = fw.launch() {
         panic!("Failed to launch FW: {:#?}", e);

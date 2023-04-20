@@ -1,331 +1,493 @@
-// SPDX-License-Identifier: MIT
-//
-// Author: yuchen@tsinghua.edu.cn
-//
-// See: https://github.com/rcore-os/bitmap-allocator
-//
 
-//! Bit allocator based on segment tree algorithm.
-use bit_field::BitField;
-use core::ops::Range;
 
-/// Allocator of a bitmap, able to allocate / free bits.
-pub trait BitAlloc: Default {
-    /// The bitmap has a total of CAP bits, numbered from 0 to CAP-1 inclusively.
-    const CAP: usize;
+pub trait BitmapAllocator {
+    const CAPACITY: usize;
 
-    /// The default value. Workaround for `const fn new() -> Self`.
-    const DEFAULT: Self;
+    fn alloc(&mut self, entries: usize, align: usize) -> Option<usize>;
+    fn free(&mut self, start: usize, entries: usize);
 
-    /// Allocate a free bit.
-    fn alloc(&mut self) -> Option<usize>;
-
-    /// Allocate a free block with a given size, and return the first bit position.
-    fn alloc_contiguous(&mut self, size: usize, align_log2: usize) -> Option<usize>;
-
-    /// Find a index not less than a given key, where the bit is free.
-    fn next(&self, key: usize) -> Option<usize>;
-
-    /// Free an allocated bit.
-    fn dealloc(&mut self, key: usize);
-
-    /// Mark bits in the range as unallocated (available)
-    fn insert(&mut self, range: Range<usize>);
-
-    /// Reverse of insert
-    fn remove(&mut self, range: Range<usize>);
-
-    /// Whether there are free bits remaining
-    #[deprecated = "use `!self.is_empty()` instead"]
-    fn any(&self) -> bool;
-
-    /// Returns true if no bits is available.
-    fn is_empty(&self) -> bool;
-
-    /// Whether a specific bit is free
-    fn test(&self, key: usize) -> bool;
+    fn set(&mut self, start: usize, entries: usize, value: bool);
+    fn next_free(&self, start: usize) -> Option<usize>;
+    fn get(&self, offset: usize) -> bool;
+    fn empty(&self) -> bool;
+    fn capacity(&self) -> usize;
+    fn used(&self) -> usize;
 }
 
-/// A bitmap of 256 bits
-pub type BitAlloc256 = BitAllocCascade16<BitAlloc16>;
-/// A bitmap of 4K bits
-pub type BitAlloc4K = BitAllocCascade16<BitAlloc256>;
-/// A bitmap of 64K bits
-pub type BitAlloc64K = BitAllocCascade16<BitAlloc4K>;
-/// A bitmap of 1M bits
-pub type BitAlloc1M = BitAllocCascade16<BitAlloc64K>;
-/// A bitmap of 16M bits
-pub type BitAlloc16M = BitAllocCascade16<BitAlloc1M>;
-/// A bitmap of 256M bits
-pub type BitAlloc256M = BitAllocCascade16<BitAlloc16M>;
+pub type BitmapAllocator1024 = BitmapAllocatorTree::<BitmapAllocator64>;
 
-/// Implement the bit allocator by segment tree algorithm.
-#[derive(Default)]
-pub struct BitAllocCascade16<T: BitAlloc> {
-    bitset: u16, // for each bit, 1 indicates available, 0 indicates inavailable
-    sub: [T; 16],
+pub struct BitmapAllocator64 {
+    bits: u64
 }
 
-impl<T: BitAlloc> BitAlloc for BitAllocCascade16<T> {
-    const CAP: usize = T::CAP * 16;
+impl BitmapAllocator64 {
+    pub const fn new() -> Self {
+        Self { bits: u64::MAX }
+    }
+}
 
-    const DEFAULT: Self = BitAllocCascade16 {
-        bitset: 0,
-        sub: [T::DEFAULT; 16],
-    };
+impl BitmapAllocator for BitmapAllocator64 {
+    const CAPACITY: usize = u64::BITS as usize;
 
-    fn alloc(&mut self) -> Option<usize> {
-        if !self.is_empty() {
-            let i = self.bitset.trailing_zeros() as usize;
-            let res = self.sub[i].alloc().unwrap() + i * T::CAP;
-            self.bitset.set_bit(i, !self.sub[i].is_empty());
-            Some(res)
+    fn alloc(&mut self, entries: usize, align: usize) -> Option<usize> {
+        alloc_aligned(self, entries, align)
+    }
+
+    fn free(&mut self, start: usize, entries: usize) {
+        self.set(start, entries, false);
+    }
+
+    fn set(&mut self, start: usize, entries: usize, value: bool) {
+        assert!((start + entries) <= BitmapAllocator64::CAPACITY);
+        // Create a mask for changing the bitmap
+        let start_mask = !((1 << start) - 1);
+        // Need to do some bit shifting to avoid overflow when top bit set
+        let end_mask = (((1 << (start + entries - 1)) - 1) << 1) + 1;
+        let mask = start_mask & end_mask;
+
+        if value {
+            self.bits |= mask;
         } else {
-            None
+            self.bits &= !mask;
         }
     }
-    fn alloc_contiguous(&mut self, size: usize, align_log2: usize) -> Option<usize> {
-        if let Some(base) = find_contiguous(self, Self::CAP, size, align_log2) {
-            self.remove(base..base + size);
-            Some(base)
-        } else {
-            None
-        }
-    }
-    fn dealloc(&mut self, key: usize) {
-        let i = key / T::CAP;
-        self.sub[i].dealloc(key % T::CAP);
-        self.bitset.set_bit(i, true);
-    }
-    fn insert(&mut self, range: Range<usize>) {
-        self.for_range(range, |sub: &mut T, range| sub.insert(range));
-    }
-    fn remove(&mut self, range: Range<usize>) {
-        self.for_range(range, |sub: &mut T, range| sub.remove(range));
-    }
-    fn any(&self) -> bool {
-        !self.is_empty()
-    }
-    fn is_empty(&self) -> bool {
-        self.bitset == 0
-    }
-    fn test(&self, key: usize) -> bool {
-        self.sub[key / T::CAP].test(key % T::CAP)
-    }
-    fn next(&self, key: usize) -> Option<usize> {
-        let idx = key / T::CAP;
-        (idx..16).find_map(|i| {
-            if self.bitset.get_bit(i) {
-                let key = if i == idx { key - T::CAP * idx } else { 0 };
-                self.sub[i].next(key).map(|x| x + T::CAP * i)
-            } else {
-                None
+
+    fn next_free(&self, start: usize) -> Option<usize> {
+        assert!(start < BitmapAllocator64::CAPACITY);
+        for offset in start..BitmapAllocator64::CAPACITY {
+            if ((1 << offset) & self.bits) == 0 {
+                return Some(offset);
             }
-        })
+        }
+        None
+    }
+
+    fn get(&self, offset: usize) -> bool {
+        assert!(offset < BitmapAllocator64::CAPACITY);
+        return (self.bits & (1 << offset)) != 0
+    }
+
+    fn empty(&self) -> bool {
+        return self.bits == 0;
+    }
+
+    fn capacity(&self) -> usize {
+        Self::CAPACITY
+    }
+
+    fn used(&self) -> usize {
+        let mut count = 0;
+        let mut bits = self.bits;
+        while bits != 0 {
+            count += 1;
+            bits &= bits - 1;
+        }
+        count
     }
 }
 
-impl<T: BitAlloc> BitAllocCascade16<T> {
-    fn for_range(&mut self, range: Range<usize>, f: impl Fn(&mut T, Range<usize>)) {
-        let Range { start, end } = range;
-        assert!(start <= end);
-        assert!(end <= Self::CAP);
-        for i in start / T::CAP..=(end - 1) / T::CAP {
-            let begin = if start / T::CAP == i {
-                start % T::CAP
+pub struct BitmapAllocatorTree<T: BitmapAllocator> {
+    bits: u16,
+    child: [T; 16],
+}
+
+impl BitmapAllocatorTree<BitmapAllocator64> {
+    pub const fn new() -> Self {
+        Self {
+            bits: u16::MAX,
+            // FIXME: Is there a better way of doing this in rust?
+            child: [
+                BitmapAllocator64::new(), BitmapAllocator64::new(), BitmapAllocator64::new(), BitmapAllocator64::new(),
+                BitmapAllocator64::new(), BitmapAllocator64::new(), BitmapAllocator64::new(), BitmapAllocator64::new(),
+                BitmapAllocator64::new(), BitmapAllocator64::new(), BitmapAllocator64::new(), BitmapAllocator64::new(),
+                BitmapAllocator64::new(), BitmapAllocator64::new(), BitmapAllocator64::new(), BitmapAllocator64::new(),
+            ]
+        }
+    }
+}
+
+impl<T: BitmapAllocator> BitmapAllocator for BitmapAllocatorTree<T> {
+    const CAPACITY: usize = T::CAPACITY * 16;
+
+    fn alloc(&mut self, entries: usize, align: usize) -> Option<usize> {
+        alloc_aligned(self, entries, align)
+    }
+
+    fn free(&mut self, start: usize, entries: usize) {
+        self.set(start, entries, false);
+    }
+
+    fn set(&mut self, start: usize, entries: usize, value: bool) {
+        assert!((start + entries) <= Self::CAPACITY);
+        let mut offset = start % T::CAPACITY;
+        let mut remain = entries;
+        for index in (start / T::CAPACITY)..16 {
+            let child_size = if remain > (T::CAPACITY - offset) {
+                T::CAPACITY - offset
             } else {
-                0
+                remain
             };
-            let end = if end / T::CAP == i {
-                end % T::CAP
+            remain -= child_size;
+
+            self.child[index].set(offset, child_size, value);
+            if self.child[index].empty() {
+                self.bits &= !(1 << index);
             } else {
-                T::CAP
-            };
-            f(&mut self.sub[i], begin..end);
-            self.bitset.set_bit(i, !self.sub[i].is_empty());
+                self.bits |= 1 << index;
+            }
+            if remain == 0 {
+                break;
+            }
+            // Only the first loop iteration uses a non-zero offset
+            offset = 0;
         }
+    }
+
+    fn next_free(&self, start: usize) -> Option<usize> {
+        assert!(start < Self::CAPACITY);
+        let mut offset = start % T::CAPACITY;
+        for index in (start / T::CAPACITY)..16 {
+            if let Some(next_offset) = self.child[index].next_free(offset) {
+                return Some(next_offset + (index * T::CAPACITY));
+            }
+            // Only the first loop iteration uses a non-zero offset
+            offset = 0;
+        }
+        None
+    }
+
+    fn get(&self, offset: usize) -> bool {
+        assert!(offset < Self::CAPACITY);
+        let index = offset / T::CAPACITY;
+        self.child[index].get(offset % T::CAPACITY)
+    }
+
+    fn empty(&self) -> bool {
+        return self.bits == 0;
+    }
+
+    fn capacity(&self) -> usize {
+        Self::CAPACITY
+    }
+
+    fn used(&self) -> usize {
+        let mut count = 0;
+        for index in 0..16 {
+            if !self.child[index].empty() {
+                count += self.child[index].used();
+            }
+        }
+        count
     }
 }
 
-/// A bitmap consisting of only 16 bits.
-/// BitAlloc16 acts as the leaf (except the leaf bits of course) nodes in the segment trees.
-#[derive(Default)]
-pub struct BitAlloc16(u16);
-
-impl BitAlloc for BitAlloc16 {
-    const CAP: usize = u16::BITS as usize;
-
-    const DEFAULT: Self = Self(0);
-
-    fn alloc(&mut self) -> Option<usize> {
-        let i = self.0.trailing_zeros() as usize;
-        if i < Self::CAP {
-            self.0.set_bit(i, false);
-            Some(i)
-        } else {
-            None
-        }
-    }
-    fn alloc_contiguous(&mut self, size: usize, align_log2: usize) -> Option<usize> {
-        if let Some(base) = find_contiguous(self, Self::CAP, size, align_log2) {
-            self.remove(base..base + size);
-            Some(base)
-        } else {
-            None
-        }
-    }
-    fn dealloc(&mut self, key: usize) {
-        assert!(!self.test(key));
-        self.0.set_bit(key, true);
-    }
-    fn insert(&mut self, range: Range<usize>) {
-        self.0.set_bits(range.clone(), 0xffff.get_bits(range));
-    }
-    fn remove(&mut self, range: Range<usize>) {
-        self.0.set_bits(range, 0);
-    }
-    fn any(&self) -> bool {
-        !self.is_empty()
-    }
-    fn is_empty(&self) -> bool {
-        self.0 == 0
-    }
-    fn test(&self, key: usize) -> bool {
-        self.0.get_bit(key)
-    }
-    fn next(&self, key: usize) -> Option<usize> {
-        (key..Self::CAP).find(|&i| self.0.get_bit(i))
-    }
-}
-
-fn find_contiguous(
-    ba: &impl BitAlloc,
-    capacity: usize,
-    size: usize,
-    align_log2: usize,
-) -> Option<usize> {
-    if capacity < (1 << align_log2) || ba.is_empty() {
-        return None;
-    }
-    let mut base = 0;
-    let mut offset = base;
-    while offset < capacity {
-        if let Some(next) = ba.next(offset) {
-            if next != offset {
-                // it can be guarenteed that no bit in (offset..next) is free
-                // move to next aligned position after next-1
-                assert!(next > offset);
-                base = (((next - 1) >> align_log2) + 1) << align_log2;
-                assert_ne!(offset, next);
-                offset = base;
+fn alloc_aligned(ba: &mut impl BitmapAllocator, entries: usize, align: usize) -> Option<usize> {
+    // Iterate through the bitmap checking on each alignment boundary
+    // for a free range of the requested size
+    let align_mask = (1 << align) - 1;
+    let mut offset = 0;
+    while (offset + entries) <= ba.capacity() {
+        if let Some(offset_free) = ba.next_free(offset) {
+            // If the next free offset does not match the current aligned
+            // offset then move forward to the next aligned offset
+            if offset_free != offset {
+                offset = ((offset_free - 1) & !align_mask) + (1 << align);
                 continue;
             }
-        } else {
-            return None;
+            // The aligned offset is free. Keep checking the next bit until we
+            // reach the requested size
+            assert!((offset + entries) <= ba.capacity());
+            let mut free_entries = 0;
+            for size_check in offset..(offset + entries) {
+                if !ba.get(size_check) {
+                    free_entries += 1;
+                } else {
+                    break;
+                }
+            }
+            if free_entries == entries {
+                // Mark the range as in-use
+                ba.set(offset, entries, true);
+                return Some(offset);
+            }
         }
-        offset += 1;
-        if offset - base == size {
-            return Some(base);
-        }
+        offset += 1 << align;
     }
     None
 }
 
+//
+// Tests
+//
+
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use crate::bitmapallocator::{BitmapAllocator64, BitmapAllocator};
+
+    use super::BitmapAllocatorTree;
 
     #[test]
-    fn bitalloc16() {
-        let mut ba = BitAlloc16::default();
-        assert_eq!(BitAlloc16::CAP, 16);
-        ba.insert(0..16);
+    fn test_set_single() {
+        let mut b = BitmapAllocator64 { bits: 0 };
+        b.set(0, 1, true);
+        assert_eq!(b.bits, 0x0000000000000001);
+        b.set(8, 1, true);
+        assert_eq!(b.bits, 0x0000000000000101);
+        b.set(63, 1, true);
+        assert_eq!(b.bits, 0x8000000000000101);
+        assert_eq!(b.used(), 3);
+    }
+
+    #[test]
+    fn test_clear_single() {
+        let mut b = BitmapAllocator64 { bits: u64::MAX };
+        b.set(0, 1, false);
+        assert_eq!(b.bits, 0xfffffffffffffffe);
+        b.set(8, 1, false);
+        assert_eq!(b.bits, 0xfffffffffffffefe);
+        b.set(63, 1, false);
+        assert_eq!(b.bits, 0x7ffffffffffffefe);
+        assert_eq!(b.used(), 64 - 3);
+    }
+
+    #[test]
+    fn test_set_range() {
+        let mut b = BitmapAllocator64 { bits: 0 };
+        b.set(0, 9, true);
+        assert_eq!(b.bits, 0x00000000000001ff);
+        b.set(11, 4, true);
+        assert_eq!(b.bits, 0x00000000000079ff);
+        b.set(61, 3, true);
+        assert_eq!(b.bits, 0xe0000000000079ff);
+        assert_eq!(b.used(), 16);
+    }
+
+    #[test]
+    fn test_clear_range() {
+        let mut b = BitmapAllocator64 { bits: u64::MAX };
+        b.set(0, 9, false);
+        assert_eq!(b.bits, !0x00000000000001ff);
+        b.set(11, 4, false);
+        assert_eq!(b.bits, !0x00000000000079ff);
+        b.set(61, 3, false);
+        assert_eq!(b.bits, !0xe0000000000079ff);
+        assert_eq!(b.used(), 64 - 16);
+    }
+
+    #[test]
+    #[should_panic]
+    fn test_exceed_range() {
+        let mut b = BitmapAllocator64 { bits: 0 };
+        b.set(0, 65, true);
+    }
+
+    #[test]
+    #[should_panic]
+    fn test_exceed_start() {
+        let mut b = BitmapAllocator64 { bits: 0 };
+        b.set(64, 1, true);
+    }
+
+    #[test]
+    fn test_next_free() {
+        let mut b = BitmapAllocator64 { bits: !0x8000000000000101 };
+        assert_eq!(b.next_free(0), Some(0));
+        assert_eq!(b.next_free(1), Some(8));
+        assert_eq!(b.next_free(9), Some(63));
+        b.set(63, 1, true);
+        assert_eq!(b.next_free(9), None);
+    }
+
+    #[test]
+    fn alloc_simple() {
+        let mut b = BitmapAllocator64 { bits: 0 };
+        assert_eq!(b.alloc(1, 0), Some(0));
+        assert_eq!(b.alloc(1, 0), Some(1));
+        assert_eq!(b.alloc(1, 0), Some(2));
+    }
+
+    #[test]
+    fn alloc_aligned() {
+        let mut b = BitmapAllocator64 { bits: 0 };
+        // Alignment of 1 << 4 bits : 16 bit alignment
+        assert_eq!(b.alloc(1, 4), Some(0));
+        assert_eq!(b.alloc(1, 4), Some(16));
+        assert_eq!(b.alloc(1, 4), Some(32));
+    }
+
+    #[test]
+    fn alloc_large_aligned() {
+        let mut b = BitmapAllocator64 { bits: 0 };
+        // Alignment of 1 << 4 bits : 16 bit alignment
+        assert_eq!(b.alloc(17, 4), Some(0));
+        assert_eq!(b.alloc(1, 4), Some(32));
+    }
+
+    #[test]
+    fn alloc_out_of_space() {
+        let mut b = BitmapAllocator64 { bits: 0 };
+        // Alignment of 1 << 4 bits : 16 bit alignment
+        assert_eq!(b.alloc(50, 4), Some(0));
+        assert_eq!(b.alloc(1, 4), None);
+    }
+
+    #[test]
+    fn free_space() {
+        let mut b = BitmapAllocator64 { bits: 0 };
+        // Alignment of 1 << 4 bits : 16 bit alignment
+        assert_eq!(b.alloc(50, 4), Some(0));
+        assert_eq!(b.alloc(1, 4), None);
+        b.free(0, 50);
+        assert_eq!(b.alloc(1, 4), Some(0));
+    }
+
+    #[test]
+    fn free_multiple() {
+        let mut b = BitmapAllocator64 { bits: u64::MAX };
+        b.free(0, 16);
+        b.free(23, 16);
+        b.free(41, 16);
+        assert_eq!(b.alloc(16, 0), Some(0));
+        assert_eq!(b.alloc(16, 0), Some(23));
+        assert_eq!(b.alloc(16, 0), Some(41));
+        assert_eq!(b.alloc(16, 0), None);
+    }
+
+    #[test]
+    fn tree_set_all() {
+        let mut b = BitmapAllocatorTree::<BitmapAllocator64>::new();
+        b.set(0, 64 * 16, false);
         for i in 0..16 {
-            assert!(ba.test(i));
+            assert_eq!(b.child[i].bits, 0);
         }
-        ba.remove(2..8);
-        assert_eq!(ba.alloc(), Some(0));
-        assert_eq!(ba.alloc(), Some(1));
-        assert_eq!(ba.alloc(), Some(8));
-        ba.dealloc(0);
-        ba.dealloc(1);
-        ba.dealloc(8);
-
-        assert!(!ba.is_empty());
-        for _ in 0..10 {
-            assert!(ba.alloc().is_some());
-        }
-        assert!(ba.is_empty());
-        assert!(ba.alloc().is_none());
+        assert_eq!(b.bits, 0);
+        assert_eq!(b.used(), 0);
     }
 
     #[test]
-    fn bitalloc4k() {
-        let mut ba = BitAlloc4K::default();
-        assert_eq!(BitAlloc4K::CAP, 4096);
-        ba.insert(0..4096);
-        for i in 0..4096 {
-            assert!(ba.test(i));
+    fn tree_clear_all() {
+        let mut b = BitmapAllocatorTree::<BitmapAllocator64>::new();
+        b.set(0, 64 * 16, true);
+        for i in 0..16 {
+            assert_eq!(b.child[i].bits, u64::MAX);
         }
-        ba.remove(2..4094);
-        for i in 0..4096 {
-            assert_eq!(ba.test(i), !(2..4094).contains(&i));
-        }
-        assert_eq!(ba.alloc(), Some(0));
-        assert_eq!(ba.alloc(), Some(1));
-        assert_eq!(ba.alloc(), Some(4094));
-        ba.dealloc(0);
-        ba.dealloc(1);
-        ba.dealloc(4094);
-
-        assert!(!ba.is_empty());
-        for _ in 0..4 {
-            assert!(ba.alloc().is_some());
-        }
-        assert!(ba.is_empty());
-        assert!(ba.alloc().is_none());
+        assert_eq!(b.bits, u16::MAX);
+        assert_eq!(b.used(), 1024);
     }
 
     #[test]
-    fn bitalloc_contiguous() {
-        let mut ba0 = BitAlloc16::default();
-        ba0.insert(0..BitAlloc16::CAP);
-        ba0.remove(3..6);
-        assert_eq!(ba0.next(0), Some(0));
-        assert_eq!(ba0.alloc_contiguous(1, 1), Some(0));
-        assert_eq!(find_contiguous(&ba0, BitAlloc4K::CAP, 2, 0), Some(1));
+    fn tree_set_some() {
+        let mut b = BitmapAllocatorTree::<BitmapAllocator64>::new();
 
-        let mut ba = BitAlloc4K::default();
-        assert_eq!(BitAlloc4K::CAP, 4096);
-        ba.insert(0..BitAlloc4K::CAP);
-        ba.remove(3..6);
-        assert_eq!(ba.next(0), Some(0));
-        assert_eq!(ba.alloc_contiguous(1, 1), Some(0));
-        assert_eq!(ba.next(0), Some(1));
-        assert_eq!(ba.next(1), Some(1));
-        assert_eq!(ba.next(2), Some(2));
-        assert_eq!(find_contiguous(&ba, BitAlloc4K::CAP, 2, 0), Some(1));
-        assert_eq!(ba.alloc_contiguous(2, 0), Some(1));
-        assert_eq!(ba.alloc_contiguous(2, 3), Some(8));
-        ba.remove(0..4096 - 64);
-        assert_eq!(ba.alloc_contiguous(128, 7), None);
-        assert_eq!(ba.alloc_contiguous(7, 3), Some(4096 - 64));
-        ba.insert(321..323);
-        assert_eq!(ba.alloc_contiguous(2, 1), Some(4096 - 64 + 8));
-        assert_eq!(ba.alloc_contiguous(2, 0), Some(321));
-        assert_eq!(ba.alloc_contiguous(64, 6), None);
-        assert_eq!(ba.alloc_contiguous(32, 4), Some(4096 - 48));
-        for i in 0..4096 - 64 + 7 {
-            ba.dealloc(i);
+        // First child
+        b.set(0, BitmapAllocatorTree::<BitmapAllocator64>::CAPACITY, false);
+        b.set(11, 17, true);
+        for i in 0..16 {
+            if i == 0 {
+                assert_eq!(b.child[i].bits, 0x000000000ffff800);
+            } else {
+                assert_eq!(b.child[i].bits, 0);
+            }
         }
-        for i in 4096 - 64 + 8..4096 - 64 + 10 {
-            ba.dealloc(i);
+        assert_eq!(b.bits, 0x0001);
+        assert_eq!(b.used(), 17);
+
+        // Last child
+        b.set(0, BitmapAllocatorTree::<BitmapAllocator64>::CAPACITY, false);
+        b.set((15 * 64) + 11, 17, true);
+        for i in 0..16 {
+            if i == 15 {
+                assert_eq!(b.child[i].bits, 0x000000000ffff800);
+            } else {
+                assert_eq!(b.child[i].bits, 0);
+            }
         }
-        for i in 4096 - 48..4096 - 16 {
-            ba.dealloc(i);
+        assert_eq!(b.bits, 0x8000);
+        assert_eq!(b.used(), 17);
+
+        // Traverse child boundary
+        b.set(0, BitmapAllocatorTree::<BitmapAllocator64>::CAPACITY, false);
+        b.set(50, 28, true);
+        for i in 0..16 {
+            if i == 0 {
+                assert_eq!(b.child[i].bits, 0xfffc000000000000);
+            } else if i == 1 {
+                assert_eq!(b.child[i].bits, 0x0000000000003fff);
+            } else {
+                assert_eq!(b.child[i].bits, 0);
+            }
         }
-        // for i in 4096 - 32..4096 {
-        //     ba.dealloc(i);
-        // }
+        assert_eq!(b.bits, 0x0003);
+        assert_eq!(b.used(), 28);
+    }
+
+    #[test]
+    fn tree_alloc_simple() {
+        let mut b = BitmapAllocatorTree::<BitmapAllocator64>::new();
+        b.set(0, BitmapAllocatorTree::<BitmapAllocator64>::CAPACITY, false);
+        for i in 0..256 {
+            assert_eq!(b.alloc(1, 0), Some(i));
+        }
+        assert_eq!(b.used(), 256);
+    }
+
+    #[test]
+    fn tree_alloc_aligned() {
+        let mut b = BitmapAllocatorTree::<BitmapAllocator64>::new();
+        b.set(0, BitmapAllocatorTree::<BitmapAllocator64>::CAPACITY, false);
+        // Alignment of 1 << 5 bits : 32 bit alignment
+        assert_eq!(b.alloc(1, 5), Some(0));
+        assert_eq!(b.alloc(1, 5), Some(32));
+        assert_eq!(b.alloc(1, 5), Some(64));
+        assert_eq!(b.alloc(1, 5), Some(96));
+        assert_eq!(b.alloc(1, 5), Some(128));
+        assert_eq!(b.alloc(1, 0), Some(1));
+        assert_eq!(b.used(), 6);
+    }
+
+    #[test]
+    fn tree_alloc_large_aligned() {
+        let mut b = BitmapAllocatorTree::<BitmapAllocator64>::new();
+        b.set(0, BitmapAllocatorTree::<BitmapAllocator64>::CAPACITY, false);
+        // Alignment of 1 << 4 bits : 16 bit alignment
+        assert_eq!(b.alloc(500, 4), Some(0));
+        assert_eq!(b.alloc(400, 4), Some(512));
+        assert_eq!(b.used(), 900);
+    }
+
+    #[test]
+    fn tree_alloc_out_of_space() {
+        let mut b = BitmapAllocatorTree::<BitmapAllocator64>::new();
+        b.set(0, BitmapAllocatorTree::<BitmapAllocator64>::CAPACITY, false);
+        // Alignment of 1 << 4 bits : 16 bit alignment
+        assert_eq!(b.alloc(1000, 4), Some(0));
+        assert_eq!(b.alloc(BitmapAllocatorTree::<BitmapAllocator64>::CAPACITY - 100, 4), None);
+        assert_eq!(b.used(), 1000);
+    }
+
+    #[test]
+    fn tree_free_space() {
+        let mut b = BitmapAllocatorTree::<BitmapAllocator64>::new();
+        b.set(0, BitmapAllocatorTree::<BitmapAllocator64>::CAPACITY, false);
+        // Alignment of 1 << 4 bits : 16 bit alignment
+        assert_eq!(b.alloc(BitmapAllocatorTree::<BitmapAllocator64>::CAPACITY - 10, 4), Some(0));
+        assert_eq!(b.alloc(1, 4), None);
+        b.free(0, 50);
+        assert_eq!(b.alloc(1, 4), Some(0));
+        assert_eq!(b.used(), 965);
+    }
+
+    #[test]
+    fn tree_free_multiple() {
+        let mut b = BitmapAllocatorTree::<BitmapAllocator64>::new();
+        b.set(0, BitmapAllocatorTree::<BitmapAllocator64>::CAPACITY, true);
+        b.free(0, 16);
+        b.free(765, 16);
+        b.free(897, 16);
+        assert_eq!(b.alloc(16, 0), Some(0));
+        assert_eq!(b.alloc(16, 0), Some(765));
+        assert_eq!(b.alloc(16, 0), Some(897));
+        assert_eq!(b.alloc(16, 0), None);
+        assert_eq!(b.used(), 1024);
     }
 }
