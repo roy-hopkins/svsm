@@ -203,6 +203,14 @@ impl PageTable {
         })
     }
 
+    // When GDB is enabled allow the executable memory to be writable to
+    // allow software breakpoints to be set
+    #[cfg(feature = "enable-gdb")]
+    pub fn exec_flags() -> PTEntryFlags {
+        PTEntryFlags::PRESENT | PTEntryFlags::GLOBAL | PTEntryFlags::ACCESSED | PTEntryFlags::DIRTY | PTEntryFlags::WRITABLE
+    }
+
+    #[cfg(not(feature = "enable-gdb"))]
     pub fn exec_flags() -> PTEntryFlags {
         PTEntryFlags::PRESENT | PTEntryFlags::GLOBAL | PTEntryFlags::ACCESSED | PTEntryFlags::DIRTY
     }

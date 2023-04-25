@@ -17,6 +17,7 @@ use log;
 use svsm::console::{init_console, install_console_logger, WRITER};
 use svsm::cpu::cpuid::{dump_cpuid_table, register_cpuid_table, SnpCpuidTable};
 use svsm::cpu::percpu::{this_cpu_mut, PerCpu};
+use svsm::debug::gdbstub::svsm_gdbstub::debug_break;
 use svsm::error::SvsmError;
 use svsm::fw_cfg::{FwCfg, MemoryRegion};
 use svsm::kernel_launch::KernelLaunchInfo;
@@ -258,6 +259,7 @@ pub extern "C" fn stage2_main(kernel_start: PhysAddr, kernel_end: PhysAddr) {
 fn panic(info: &PanicInfo) -> ! {
     log::error!("Panic: {}", info);
     loop {
+        debug_break();
         halt();
     }
 }
