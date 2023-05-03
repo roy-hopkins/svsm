@@ -1,74 +1,73 @@
 diff --git a/OvmfPkg/Include/Fdf/OvmfPkgDefines.fdf.inc b/OvmfPkg/Include/Fdf/OvmfPkgDefines.fdf.inc
-index 6170c5993c..06f735b3fc 100644
+index 6170c5993c..e393c52eec 100644
 --- a/OvmfPkg/Include/Fdf/OvmfPkgDefines.fdf.inc
 +++ b/OvmfPkg/Include/Fdf/OvmfPkgDefines.fdf.inc
-@@ -67,6 +67,23 @@ DEFINE SECFV_OFFSET      = 0x003CC000
- DEFINE SECFV_SIZE        = 0x34000
- !endif
+@@ -97,6 +97,8 @@ SET gUefiOvmfPkgTokenSpaceGuid.PcdBfvBase           = $(CODE_BASE_ADDRESS)
+ SET gUefiOvmfPkgTokenSpaceGuid.PcdBfvRawDataOffset  = $(VARS_SIZE)
+ SET gUefiOvmfPkgTokenSpaceGuid.PcdBfvRawDataSize    = $(CODE_SIZE)
  
-+!if $(FD_SVSM)
-+DEFINE VARS_SIZE         = 0x84000
-+DEFINE VARS_BLOCKS       = 0x84
-+DEFINE VARS_LIVE_SIZE    = 0x40000
-+DEFINE VARS_SPARE_SIZE   = 0x42000
++SET gUefiOvmfPkgTokenSpaceGuid.PcdOvmfResetVectorAddressPage = $(FW_BASE_ADDRESS) + $(SECFV_OFFSET) + $(SECFV_SIZE) - 0x1000
 +
-+DEFINE FW_BASE_ADDRESS   = 0xFFC00000
-+DEFINE FW_SIZE           = 0x003FF000diff --git a/OvmfPkg/Include/Fdf/OvmfPkgDefines.fdf.inc b/OvmfPkg/Include/Fdf/OvmfPkgDefines.fdf.inc
-index 6170c5993c..06f735b3fc 100644
---- a/OvmfPkg/Include/Fdf/OvmfPkgDefines.fdf.inc
-+++ b/OvmfPkg/Include/Fdf/OvmfPkgDefines.fdf.inc
-@@ -67,6 +67,23 @@ DEFINE SECFV_OFFSET      = 0x003CC000
- DEFINE SECFV_SIZE        = 0x34000
- !endif
+ !if $(SMM_REQUIRE) == TRUE
+ SET gEfiMdeModulePkgTokenSpaceGuid.PcdFlashNvStorageVariableBase64 = gUefiOvmfPkgTokenSpaceGuid.PcdOvmfFlashNvStorageVariableBase
+ SET gEfiMdeModulePkgTokenSpaceGuid.PcdFlashNvStorageFtwWorkingBase = gUefiOvmfPkgTokenSpaceGuid.PcdOvmfFlashNvStorageFtwWorkingBase
+diff --git a/OvmfPkg/OvmfPkg.dec b/OvmfPkg/OvmfPkg.dec
+index b804f13e3f..740ed9c4b4 100644
+--- a/OvmfPkg/OvmfPkg.dec
++++ b/OvmfPkg/OvmfPkg.dec
+@@ -262,6 +262,7 @@
+   gUefiOvmfPkgTokenSpaceGuid.PcdOvmfLockBoxStorageSize|0x0|UINT32|0x19
+   gUefiOvmfPkgTokenSpaceGuid.PcdGuidedExtractHandlerTableSize|0x0|UINT32|0x1a
+   gUefiOvmfPkgTokenSpaceGuid.PcdOvmfDecompressionScratchEnd|0x0|UINT32|0x1f
++  gUefiOvmfPkgTokenSpaceGuid.PcdOvmfResetVectorAddressPage|0x0|UINT32|0x100
  
-+!if $(FD_SVSM)
-+DEFINE VARS_SIZE         = 0x84000
-+DEFINE VARS_BLOCKS       = 0x84
-+DEFINE VARS_LIVE_SIZE    = 0x40000
-+DEFINE VARS_SPARE_SIZE   = 0x42000
+   ## Pcd8259LegacyModeMask defines the default mask value for platform. This
+   #  value is determined.
+@@ -426,6 +427,17 @@
+   gUefiOvmfPkgTokenSpaceGuid.PcdOvmfSecSvsmCaaBase|0|UINT32|0x66
+   gUefiOvmfPkgTokenSpaceGuid.PcdOvmfSecSvsmCaaSize|0|UINT32|0x67
+ 
++  ## SVSM module values for presenting in metadata
++  gUefiOvmfPkgTokenSpaceGuid.PcdSvsmBase|0x0|UINT32|0x101
++  gUefiOvmfPkgTokenSpaceGuid.PcdSvsmOffset|0x0|UINT32|0x102
++  gUefiOvmfPkgTokenSpaceGuid.PcdSvsmSecMemBase|0|UINT32|0x103
++  gUefiOvmfPkgTokenSpaceGuid.PcdSvsmSecMemSize|0x9e000|UINT32|0x104
++  gUefiOvmfPkgTokenSpaceGuid.PcdSvsmSecretsBase|0x9e000|UINT32|0x105
++  gUefiOvmfPkgTokenSpaceGuid.PcdSvsmSecretsSize|0x1000|UINT32|0x106
++  gUefiOvmfPkgTokenSpaceGuid.PcdSvsmCpuidBase|0x9f000|UINT32|0x107
++  gUefiOvmfPkgTokenSpaceGuid.PcdSvsmCpuidSize|0x1000|UINT32|0x108
++  gUefiOvmfPkgTokenSpaceGuid.PcdSevEsApResetIp|0xfffffff0|UINT32|0x109
 +
-+DEFINE FW_BASE_ADDRESS   = 0xFFC00000
-+DEFINE FW_SIZE           = 0x003FF000
-+DEFINE FW_BLOCKS         = 0x3ff
-+DEFINE CODE_BASE_ADDRESS = 0xFFC84000
-+DEFINE CODE_SIZE         = 0x0037C000
-+DEFINE CODE_BLOCKS       = 0x37C
-+DEFINE FVMAIN_SIZE       = 0x00348000
-+DEFINE SECFV_OFFSET      = 0x003CC000
-+DEFINE SECFV_SIZE        = 0x33000
-+!endif
-+
- SET gUefiOvmfPkgTokenSpaceGuid.PcdOvmfFdBaseAddress     = $(FW_BASE_ADDRESS)
- SET gUefiOvmfPkgTokenSpaceGuid.PcdOvmfFirmwareFdSize    = $(FW_SIZE)
- SET gUefiOvmfPkgTokenSpaceGuid.PcdOvmfFirmwareBlockSize = $(BLOCK_SIZE)
+ [PcdsDynamic, PcdsDynamicEx]
+   gUefiOvmfPkgTokenSpaceGuid.PcdEmuVariableEvent|0|UINT64|2
+   gUefiOvmfPkgTokenSpaceGuid.PcdOvmfFlashVariablesEnable|FALSE|BOOLEAN|0x10
 diff --git a/OvmfPkg/ResetVector/ResetVector.inf b/OvmfPkg/ResetVector/ResetVector.inf
-index 0f5f8fec0b..22a3a933fb 100644
+index 0f5f8fec0b..197bedfcf0 100644
 --- a/OvmfPkg/ResetVector/ResetVector.inf
 +++ b/OvmfPkg/ResetVector/ResetVector.inf
-@@ -66,3 +66,5 @@
+@@ -66,3 +66,4 @@
    gUefiOvmfPkgTokenSpaceGuid.PcdOvmfSecSvsmCaaSize
    gUefiOvmfPkgTokenSpaceGuid.PcdOvmfSnpSecretsBase
    gUefiOvmfPkgTokenSpaceGuid.PcdOvmfSnpSecretsSize
-+  gUefiOvmfPkgTokenSpaceGuid.PcdOvmfFdBaseAddress
-+  gUefiOvmfPkgTokenSpaceGuid.PcdOvmfFirmwareFdSize
++  gUefiOvmfPkgTokenSpaceGuid.PcdOvmfResetVectorAddressPage
 \ No newline at end of file
 diff --git a/OvmfPkg/ResetVector/ResetVector.nasmb b/OvmfPkg/ResetVector/ResetVector.nasmb
-index 54745c3d09..008ec1d841 100644
+index 54745c3d09..3116e05056 100644
 --- a/OvmfPkg/ResetVector/ResetVector.nasmb
 +++ b/OvmfPkg/ResetVector/ResetVector.nasmb
 @@ -34,6 +34,10 @@
  
  %include "CommonMacros.inc"
  
-+%define FW_TOP               (FixedPcdGet32 (PcdOvmfFdBaseAddress) + FixedPcdGet32 (PcdOvmfFirmwareFdSize))
-+%define ADDR16_OF(x) ((FW_TOP & 0xffff) - fourGigabytes + x)
-+%define ADDR_OF(x) (FW_TOP - fourGigabytes + x)
++%define RESET_VECTOR_TOP               (FixedPcdGet32 (PcdOvmfResetVectorAddressPage) + 0x1000)
++%define ADDR16_OF(x)                   ((RESET_VECTOR_TOP & 0xffff) - fourGigabytes + x)
++%define ADDR_OF(x)                     (RESET_VECTOR_TOP - fourGigabytes + x)
 +
  %include "PostCodes.inc"
  
  %ifdef DEBUG_PORT80
 diff --git a/UefiCpuPkg/ResetVector/Vtf0/Ia32/SearchForBfvBase.asm b/UefiCpuPkg/ResetVector/Vtf0/Ia32/SearchForBfvBase.asm
-index 60f3f2e0bd..100bbf9615 100644
+index 60f3f2e0bd..80200b4aba 100644
 --- a/UefiCpuPkg/ResetVector/Vtf0/Ia32/SearchForBfvBase.asm
 +++ b/UefiCpuPkg/ResetVector/Vtf0/Ia32/SearchForBfvBase.asm
 @@ -31,7 +31,7 @@ BITS    32
@@ -76,7 +75,7 @@ index 60f3f2e0bd..100bbf9615 100644
  Flat32SearchForBfvBase:
  
 -    xor     eax, eax
-+    mov     eax, FW_TOP
++    mov     eax, RESET_VECTOR_TOP
  searchingForBfvHeaderLoop:
      ;
      ; We check for a firmware volume at every 4KB address in the top 16MB
@@ -84,20 +83,7 @@ index 60f3f2e0bd..100bbf9615 100644
      jne     searchingForBfvHeaderLoop
      mov     ebx, eax
      add     ebx, dword [eax + 0x20]
-+    cmp     ebx, FW_TOP & 0xffffffff
++    cmp     ebx, RESET_VECTOR_TOP & 0xffffffff
      jnz     searchingForBfvHeaderLoop
  
      jmp     searchedForBfvHeaderAndItWasFound
-
-+DEFINE FW_BLOCKS         = 0x3ff
-+DEFINE CODE_BASE_ADDRESS = 0xFFC84000
-+DEFINE CODE_SIZE         = 0x0037C000
-+DEFINE CODE_BLOCKS       = 0x37C
-+DEFINE FVMAIN_SIZE       = 0x00348000
-+DEFINE SECFV_OFFSET      = 0x003CC000
-+DEFINE SECFV_SIZE        = 0x33000
-+!endif
-+
- SET gUefiOvmfPkgTokenSpaceGuid.PcdOvmfFdBaseAddress     = $(FW_BASE_ADDRESS)
- SET gUefiOvmfPkgTokenSpaceGuid.PcdOvmfFirmwareFdSize    = $(FW_SIZE)
- SET gUefiOvmfPkgTokenSpaceGuid.PcdOvmfFirmwareBlockSize = $(BLOCK_SIZE)
