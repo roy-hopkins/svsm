@@ -289,7 +289,13 @@ pub fn parse_ovmf_meta_data() -> Result<SevOVMFMetaData, SvsmError> {
             let (base, _len) = tbl;
             let off_ptr = base as *const u32;
             let offset = off_ptr.read_unaligned() as usize;
-
+            // The offset provided as part of the metadata is the offset from the end of the
+            // firmware volume (4GB) and not the end of the metadata page. Subtract the
+            // offset of the metdata page to get the actual offset. This should fall within
+            // the current virtual page.
+            let metadata_offset = (4 * SIZE_1G) - OVMF_METADATA_PHYS;
+            assert!((offset < metadata_offset) && (offset >= (metadata_offset - PAGE_SIZE)));
+            let offset = offset & (PAGE_SIZE - 1);
             let meta_ptr = (vend - offset) as *const SevMetaDataHeader;
             //let len = meta_ptr.read().len;
             let num_descs = meta_ptr.read().num_desc as isize;

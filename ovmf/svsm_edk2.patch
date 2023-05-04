@@ -1,29 +1,8 @@
-diff --git a/OvmfPkg/Include/Fdf/OvmfPkgDefines.fdf.inc b/OvmfPkg/Include/Fdf/OvmfPkgDefines.fdf.inc
-index 6170c5993c..e393c52eec 100644
---- a/OvmfPkg/Include/Fdf/OvmfPkgDefines.fdf.inc
-+++ b/OvmfPkg/Include/Fdf/OvmfPkgDefines.fdf.inc
-@@ -97,6 +97,8 @@ SET gUefiOvmfPkgTokenSpaceGuid.PcdBfvBase           = $(CODE_BASE_ADDRESS)
- SET gUefiOvmfPkgTokenSpaceGuid.PcdBfvRawDataOffset  = $(VARS_SIZE)
- SET gUefiOvmfPkgTokenSpaceGuid.PcdBfvRawDataSize    = $(CODE_SIZE)
- 
-+SET gUefiOvmfPkgTokenSpaceGuid.PcdOvmfResetVectorAddressPage = $(FW_BASE_ADDRESS) + $(SECFV_OFFSET) + $(SECFV_SIZE) - 0x1000
-+
- !if $(SMM_REQUIRE) == TRUE
- SET gEfiMdeModulePkgTokenSpaceGuid.PcdFlashNvStorageVariableBase64 = gUefiOvmfPkgTokenSpaceGuid.PcdOvmfFlashNvStorageVariableBase
- SET gEfiMdeModulePkgTokenSpaceGuid.PcdFlashNvStorageFtwWorkingBase = gUefiOvmfPkgTokenSpaceGuid.PcdOvmfFlashNvStorageFtwWorkingBase
 diff --git a/OvmfPkg/OvmfPkg.dec b/OvmfPkg/OvmfPkg.dec
-index b804f13e3f..740ed9c4b4 100644
+index b804f13e3f..83b0f499a3 100644
 --- a/OvmfPkg/OvmfPkg.dec
 +++ b/OvmfPkg/OvmfPkg.dec
-@@ -262,6 +262,7 @@
-   gUefiOvmfPkgTokenSpaceGuid.PcdOvmfLockBoxStorageSize|0x0|UINT32|0x19
-   gUefiOvmfPkgTokenSpaceGuid.PcdGuidedExtractHandlerTableSize|0x0|UINT32|0x1a
-   gUefiOvmfPkgTokenSpaceGuid.PcdOvmfDecompressionScratchEnd|0x0|UINT32|0x1f
-+  gUefiOvmfPkgTokenSpaceGuid.PcdOvmfResetVectorAddressPage|0x0|UINT32|0x100
- 
-   ## Pcd8259LegacyModeMask defines the default mask value for platform. This
-   #  value is determined.
-@@ -426,6 +427,17 @@
+@@ -426,6 +426,17 @@
    gUefiOvmfPkgTokenSpaceGuid.PcdOvmfSecSvsmCaaBase|0|UINT32|0x66
    gUefiOvmfPkgTokenSpaceGuid.PcdOvmfSecSvsmCaaSize|0|UINT32|0x67
  
@@ -41,49 +20,666 @@ index b804f13e3f..740ed9c4b4 100644
  [PcdsDynamic, PcdsDynamicEx]
    gUefiOvmfPkgTokenSpaceGuid.PcdEmuVariableEvent|0|UINT64|2
    gUefiOvmfPkgTokenSpaceGuid.PcdOvmfFlashVariablesEnable|FALSE|BOOLEAN|0x10
+diff --git a/OvmfPkg/OvmfPkgSvsmX64.dsc b/OvmfPkg/OvmfPkgSvsmX64.dsc
+new file mode 120000
+index 0000000000..1a8714699d
+--- /dev/null
++++ b/OvmfPkg/OvmfPkgSvsmX64.dsc
+@@ -0,0 +1 @@
++../../ovmf/OvmfPkg/OvmfPkgSvsmX64.dsc
+\ No newline at end of file
+diff --git a/OvmfPkg/OvmfPkgSvsmX64.fdf b/OvmfPkg/OvmfPkgSvsmX64.fdf
+new file mode 120000
+index 0000000000..096919cd7d
+--- /dev/null
++++ b/OvmfPkg/OvmfPkgSvsmX64.fdf
+@@ -0,0 +1 @@
++../../ovmf/OvmfPkg/OvmfPkgSvsmX64.fdf
+\ No newline at end of file
+diff --git a/OvmfPkg/ResetVector/Ia16/Launch.asm b/OvmfPkg/ResetVector/Ia16/Launch.asm
+new file mode 100644
+index 0000000000..2d1726c8cf
+--- /dev/null
++++ b/OvmfPkg/ResetVector/Ia16/Launch.asm
+@@ -0,0 +1,77 @@
++;------------------------------------------------------------------------------
++; @file
++; 16-bit launch code called directly from either the reset vector or from
++; an SVSM module.
++;
++; Copyright (c) 2022-2023 SUSE LLC
++; SPDX-License-Identifier: MIT OR Apache-2.0
++; Author: Roy Hopkins <rhopkins@suse.de>
++;
++;------------------------------------------------------------------------------
++
++BITS    16
++
++ALIGN 16
++
++;
++; Pad the image size to 4k when page tables are in VTF0
++;
++; If the VTF0 image has page tables built in, then we need to make
++; sure the end of VTF0 is 4k above where the page tables end.
++;
++; This is required so the page tables will be 4k aligned when VTF0 is
++; located just below 0x100000000 (4GB) in the firmware device.
++;
++%ifdef ALIGN_TOP_TO_4K_FOR_PAGING
++    TIMES (0x1000 - ($ - EndOfPageTables) - 0x20) DB 0
++%endif
++
++;
++; Launch either the SVSM module or OVMF in real mode, based on
++; the current target.
++;
++LaunchReal16:
++%ifdef SVSM_RESET_VECTOR
++    jmp     LaunchSvsm
++%endif
++
++LaunchOvmf:
++    jmp     short EarlyBspInitReal16
++
++LaunchSvsm:
++    xor     ax, ax
++    mov     ds, ax
++    mov     es, ax
++    mov     fs, ax
++    mov     gs, ax
++    mov     ss, ax
++
++    ; Enable protected mode and disable write-through and memory caches
++    mov     eax, cr0
++    and     eax, ~((1 << 30) | (1 << 29))
++    or      al, 1
++    mov     cr0, eax
++
++o32 lgdt    [word cs:ADDR16_OF(gdt32_descr)]
++    jmp     8:dword ADDR_OF(protected_mode)
++
++BITS    32
++protected_mode:
++    mov     ax, 16
++    mov     ds, ax
++    mov     es, ax
++    mov     fs, ax
++    mov     gs, ax
++    mov     ss, ax
++    jmp     8:SVSM_BASE_ADDR
++
++gdt32:
++    dq      0
++    dq      0x00cf9b000000ffff
++    dq      0x00cf93000000ffff
++gdt32_end:
++
++gdt32_descr:
++    dw      gdt32_end - gdt32 - 1
++    dd      ADDR_OF(gdt32)
++
+diff --git a/OvmfPkg/ResetVector/Ia16/OvmfMetadata.asm b/OvmfPkg/ResetVector/Ia16/OvmfMetadata.asm
+new file mode 100644
+index 0000000000..d3caccbc60
+--- /dev/null
++++ b/OvmfPkg/ResetVector/Ia16/OvmfMetadata.asm
+@@ -0,0 +1,145 @@
++;------------------------------------------------------------------------------
++; @file
++; OVMF metadata for use by a hypervisor.
++; Derived from UefiCpuPkg/ResetVector/Vtf0/Ia16/ResetVectorVtf0.asm
++;
++; Copyright (c) 2008 - 2014, Intel Corporation. All rights reserved.<BR>
++; SPDX-License-Identifier: BSD-2-Clause-Patent
++;
++;------------------------------------------------------------------------------
++
++ALIGN   16
++
++;
++; Padding to ensure first guid starts at 0xffffffd0
++;
++TIMES (15 - ((guidedStructureEnd - guidedStructureStart + 15) % 16)) DB 0
++
++; GUIDed structure.  To traverse this you should first verify the
++; presence of the table footer guid
++; (96b582de-1fb2-45f7-baea-a366c55a082d) at 0xffffffd0.  If that
++; is found, the two bytes at 0xffffffce are the entire table length.
++;
++; The table is composed of structures with the form:
++;
++; Data (arbitrary bytes identified by guid)
++; length from start of data to end of guid (2 bytes)
++; guid (16 bytes)
++;
++; so work back from the footer using the length to traverse until you
++; either find the guid you're looking for or run off the beginning of
++; the table.
++;
++guidedStructureStart:
++
++%ifdef ARCH_X64
++;
++; TDX Metadata offset block
++;
++; TdxMetadata.asm is included in ARCH_X64 because Inte TDX is only
++; available in ARCH_X64. Below block describes the offset of
++; TdxMetadata block in Ovmf image
++;
++; GUID : e47a6535-984a-4798-865e-4685a7bf8ec2
++;
++tdxMetadataOffsetStart:
++    DD      fourGigabytes - TdxMetadataGuid - 16
++    DW      tdxMetadataOffsetEnd - tdxMetadataOffsetStart
++    DB      0x35, 0x65, 0x7a, 0xe4, 0x4a, 0x98, 0x98, 0x47
++    DB      0x86, 0x5e, 0x46, 0x85, 0xa7, 0xbf, 0x8e, 0xc2
++tdxMetadataOffsetEnd:
++
++;
++; SEV metadata descriptor
++;
++; Provide the start offset of the metadata blob within the OVMF binary.
++
++; GUID : dc886566-984a-4798-A75e-5585a7bf67cc
++;
++OvmfSevMetadataOffsetStart:
++  DD      (fourGigabytes - OvmfSevMetadataGuid)
++  DW      OvmfSevMetadataOffsetEnd - OvmfSevMetadataOffsetStart
++  DB      0x66, 0x65, 0x88, 0xdc, 0x4a, 0x98, 0x98, 0x47
++  DB      0xA7, 0x5e, 0x55, 0x85, 0xa7, 0xbf, 0x67, 0xcc
++OvmfSevMetadataOffsetEnd:
++
++%endif
++
++; SEV Hash Table Block
++;
++; This describes the guest ram area where the hypervisor should
++; install a table describing the hashes of certain firmware configuration
++; device files that would otherwise be passed in unchecked.  The current
++; use is for the kernel, initrd and command line values, but others may be
++; added.  The data format is:
++;
++; base physical address (32 bit word)
++; table length (32 bit word)
++;
++; GUID (SEV FW config hash block): 7255371f-3a3b-4b04-927b-1da6efa8d454
++;
++sevFwHashBlockStart:
++    DD      SEV_FW_HASH_BLOCK_BASE
++    DD      SEV_FW_HASH_BLOCK_SIZE
++    DW      sevFwHashBlockEnd - sevFwHashBlockStart
++    DB      0x1f, 0x37, 0x55, 0x72, 0x3b, 0x3a, 0x04, 0x4b
++    DB      0x92, 0x7b, 0x1d, 0xa6, 0xef, 0xa8, 0xd4, 0x54
++sevFwHashBlockEnd:
++
++; SEV Secret block
++;
++; This describes the guest ram area where the hypervisor should
++; inject the secret.  The data format is:
++;
++; base physical address (32 bit word)
++; table length (32 bit word)
++;
++; GUID (SEV secret block): 4c2eb361-7d9b-4cc3-8081-127c90d3d294
++;
++sevSecretBlockStart:
++    DD      SEV_LAUNCH_SECRET_BASE
++    DD      SEV_LAUNCH_SECRET_SIZE
++    DW      sevSecretBlockEnd - sevSecretBlockStart
++    DB      0x61, 0xB3, 0x2E, 0x4C, 0x9B, 0x7D, 0xC3, 0x4C
++    DB      0x80, 0x81, 0x12, 0x7C, 0x90, 0xD3, 0xD2, 0x94
++sevSecretBlockEnd:
++
++;
++; SEV-ES Processor Reset support
++;
++; sevEsResetBlock:
++;   For the initial boot of an AP under SEV-ES, the "reset" RIP must be
++;   programmed to the RAM area defined by SEV_ES_AP_RESET_IP. The data
++;   format is:
++;
++;   IP value [0:15]
++;   CS segment base [31:16]
++;
++;   GUID (SEV-ES reset block): 00f771de-1a7e-4fcb-890e-68c77e2fb44e
++;
++;   A hypervisor reads the CS segement base and IP value. The CS segment base
++;   value represents the high order 16-bits of the CS segment base, so the
++;   hypervisor must left shift the value of the CS segement base by 16 bits to
++;   form the full CS segment base for the CS segment register. It would then
++;   program the EIP register with the IP value as read.
++;
++
++sevEsResetBlockStart:
++    DD      SEV_ES_AP_RESET_IP
++    DW      sevEsResetBlockEnd - sevEsResetBlockStart
++    DB      0xDE, 0x71, 0xF7, 0x00, 0x7E, 0x1A, 0xCB, 0x4F
++    DB      0x89, 0x0E, 0x68, 0xC7, 0x7E, 0x2F, 0xB4, 0x4E
++sevEsResetBlockEnd:
++
++;
++; Table footer:
++;
++; length of whole table (16 bit word)
++; GUID (table footer): 96b582de-1fb2-45f7-baea-a366c55a082d
++;
++    DW      guidedStructureEnd - guidedStructureStart
++    DB      0xDE, 0x82, 0xB5, 0x96, 0xB2, 0x1F, 0xF7, 0x45
++    DB      0xBA, 0xEA, 0xA3, 0x66, 0xC5, 0x5A, 0x08, 0x2D
++
++guidedStructureEnd:
++
+diff --git a/OvmfPkg/ResetVector/Ia16/ResetVectorVtf0.asm b/OvmfPkg/ResetVector/Ia16/ResetVectorVtf0.asm
+index 12f2cedd67..45310d594d 100644
+--- a/OvmfPkg/ResetVector/Ia16/ResetVectorVtf0.asm
++++ b/OvmfPkg/ResetVector/Ia16/ResetVectorVtf0.asm
+@@ -12,154 +12,6 @@ BITS    16
+ 
+ ALIGN   16
+ 
+-;
+-; Pad the image size to 4k when page tables are in VTF0
+-;
+-; If the VTF0 image has page tables built in, then we need to make
+-; sure the end of VTF0 is 4k above where the page tables end.
+-;
+-; This is required so the page tables will be 4k aligned when VTF0 is
+-; located just below 0x100000000 (4GB) in the firmware device.
+-;
+-%ifdef ALIGN_TOP_TO_4K_FOR_PAGING
+-    TIMES (0x1000 - ($ - EndOfPageTables) - 0x20) DB 0
+-%endif
+-
+-;
+-; Padding to ensure first guid starts at 0xffffffd0
+-;
+-TIMES (15 - ((guidedStructureEnd - guidedStructureStart + 15) % 16)) DB 0
+-
+-; GUIDed structure.  To traverse this you should first verify the
+-; presence of the table footer guid
+-; (96b582de-1fb2-45f7-baea-a366c55a082d) at 0xffffffd0.  If that
+-; is found, the two bytes at 0xffffffce are the entire table length.
+-;
+-; The table is composed of structures with the form:
+-;
+-; Data (arbitrary bytes identified by guid)
+-; length from start of data to end of guid (2 bytes)
+-; guid (16 bytes)
+-;
+-; so work back from the footer using the length to traverse until you
+-; either find the guid you're looking for or run off the beginning of
+-; the table.
+-;
+-guidedStructureStart:
+-
+-%ifdef ARCH_X64
+-;
+-; TDX Metadata offset block
+-;
+-; TdxMetadata.asm is included in ARCH_X64 because Inte TDX is only
+-; available in ARCH_X64. Below block describes the offset of
+-; TdxMetadata block in Ovmf image
+-;
+-; GUID : e47a6535-984a-4798-865e-4685a7bf8ec2
+-;
+-tdxMetadataOffsetStart:
+-    DD      fourGigabytes - TdxMetadataGuid - 16
+-    DW      tdxMetadataOffsetEnd - tdxMetadataOffsetStart
+-    DB      0x35, 0x65, 0x7a, 0xe4, 0x4a, 0x98, 0x98, 0x47
+-    DB      0x86, 0x5e, 0x46, 0x85, 0xa7, 0xbf, 0x8e, 0xc2
+-tdxMetadataOffsetEnd:
+-
+-;
+-; SEV metadata descriptor
+-;
+-; Provide the start offset of the metadata blob within the OVMF binary.
+-
+-; GUID : dc886566-984a-4798-A75e-5585a7bf67cc
+-;
+-OvmfSevMetadataOffsetStart:
+-  DD      (fourGigabytes - OvmfSevMetadataGuid)
+-  DW      OvmfSevMetadataOffsetEnd - OvmfSevMetadataOffsetStart
+-  DB      0x66, 0x65, 0x88, 0xdc, 0x4a, 0x98, 0x98, 0x47
+-  DB      0xA7, 0x5e, 0x55, 0x85, 0xa7, 0xbf, 0x67, 0xcc
+-OvmfSevMetadataOffsetEnd:
+-
+-%endif
+-
+-; SEV Hash Table Block
+-;
+-; This describes the guest ram area where the hypervisor should
+-; install a table describing the hashes of certain firmware configuration
+-; device files that would otherwise be passed in unchecked.  The current
+-; use is for the kernel, initrd and command line values, but others may be
+-; added.  The data format is:
+-;
+-; base physical address (32 bit word)
+-; table length (32 bit word)
+-;
+-; GUID (SEV FW config hash block): 7255371f-3a3b-4b04-927b-1da6efa8d454
+-;
+-sevFwHashBlockStart:
+-    DD      SEV_FW_HASH_BLOCK_BASE
+-    DD      SEV_FW_HASH_BLOCK_SIZE
+-    DW      sevFwHashBlockEnd - sevFwHashBlockStart
+-    DB      0x1f, 0x37, 0x55, 0x72, 0x3b, 0x3a, 0x04, 0x4b
+-    DB      0x92, 0x7b, 0x1d, 0xa6, 0xef, 0xa8, 0xd4, 0x54
+-sevFwHashBlockEnd:
+-
+-; SEV Secret block
+-;
+-; This describes the guest ram area where the hypervisor should
+-; inject the secret.  The data format is:
+-;
+-; base physical address (32 bit word)
+-; table length (32 bit word)
+-;
+-; GUID (SEV secret block): 4c2eb361-7d9b-4cc3-8081-127c90d3d294
+-;
+-sevSecretBlockStart:
+-    DD      SEV_LAUNCH_SECRET_BASE
+-    DD      SEV_LAUNCH_SECRET_SIZE
+-    DW      sevSecretBlockEnd - sevSecretBlockStart
+-    DB      0x61, 0xB3, 0x2E, 0x4C, 0x9B, 0x7D, 0xC3, 0x4C
+-    DB      0x80, 0x81, 0x12, 0x7C, 0x90, 0xD3, 0xD2, 0x94
+-sevSecretBlockEnd:
+-
+-;
+-; SEV-ES Processor Reset support
+-;
+-; sevEsResetBlock:
+-;   For the initial boot of an AP under SEV-ES, the "reset" RIP must be
+-;   programmed to the RAM area defined by SEV_ES_AP_RESET_IP. The data
+-;   format is:
+-;
+-;   IP value [0:15]
+-;   CS segment base [31:16]
+-;
+-;   GUID (SEV-ES reset block): 00f771de-1a7e-4fcb-890e-68c77e2fb44e
+-;
+-;   A hypervisor reads the CS segement base and IP value. The CS segment base
+-;   value represents the high order 16-bits of the CS segment base, so the
+-;   hypervisor must left shift the value of the CS segement base by 16 bits to
+-;   form the full CS segment base for the CS segment register. It would then
+-;   program the EIP register with the IP value as read.
+-;
+-
+-sevEsResetBlockStart:
+-    DD      SEV_ES_AP_RESET_IP
+-    DW      sevEsResetBlockEnd - sevEsResetBlockStart
+-    DB      0xDE, 0x71, 0xF7, 0x00, 0x7E, 0x1A, 0xCB, 0x4F
+-    DB      0x89, 0x0E, 0x68, 0xC7, 0x7E, 0x2F, 0xB4, 0x4E
+-sevEsResetBlockEnd:
+-
+-;
+-; Table footer:
+-;
+-; length of whole table (16 bit word)
+-; GUID (table footer): 96b582de-1fb2-45f7-baea-a366c55a082d
+-;
+-    DW      guidedStructureEnd - guidedStructureStart
+-    DB      0xDE, 0x82, 0xB5, 0x96, 0xB2, 0x1F, 0xF7, 0x45
+-    DB      0xBA, 0xEA, 0xA3, 0x66, 0xC5, 0x5A, 0x08, 0x2D
+-
+-guidedStructureEnd:
+-
+-ALIGN   16
+-
+ applicationProcessorEntryPoint:
+ ;
+ ; Application Processors entry point
+@@ -211,7 +63,7 @@ BITS 32
+     jmp     Main32
+ BITS 16
+ .Real:
+-    jmp     EarlyBspInitReal16
++    jmp     LaunchReal16
+ 
+ %endif
+ 
+diff --git a/OvmfPkg/ResetVector/Ia16/SvsmMetadata.asm b/OvmfPkg/ResetVector/Ia16/SvsmMetadata.asm
+new file mode 100644
+index 0000000000..994ead7255
+--- /dev/null
++++ b/OvmfPkg/ResetVector/Ia16/SvsmMetadata.asm
+@@ -0,0 +1,184 @@
++;------------------------------------------------------------------------------
++; @file
++; Populates hypervisor metadata for the SVSM module and creates a launch
++; vector at a known location for the SVSM module to subsequently launch OVMF.
++;
++; Copyright (c) 2022-2023 SUSE LLC
++; SPDX-License-Identifier: MIT OR Apache-2.0
++; Author: Roy Hopkins <rhopkins@suse.de>
++;
++;------------------------------------------------------------------------------
++
++BITS 16
++
++;
++; When configured to launch an SVSM module, the OVMF metadata should be positioned
++; exactly 4K below this module. Create a launch vector for the SVSM to start
++; OVMF at 4K below the actual reset vector.
++;
++TIMES 16 DB 0
++jmp     LaunchOvmf
++ALIGN   16
++
++;
++; These structures are always immediately followed by the 32 byte VTF structures
++; and code. Ensure this entire structure takes the remainder of the 4K from the
++; end of VTF
++;
++TIMES (0x1000 - 0x20 - (SvsmMetadataEnd - SvsmMetadataStart)) DB 0
++
++SvsmMetadataStart:
++
++ALIGN 16
++
++SvsmSevMetadataGuid:
++
++SvsmDescriptorSev:
++  DB 'A','S','E','V'                                            ; Signature
++  DD SvsmSevGuidedStructureEnd - SvsmDescriptorSev              ; Length
++  DD SVSM_SEV_METADATA_VERSION                                  ; Version
++  DD (SvsmSevGuidedStructureEnd - SvsmDescriptorSev - 16) / 12  ; Number of sections
++
++; Region need to be pre-validated by the hypervisor
++SvsmPreValidate1:
++  DD  SVSM_SEC_MEM_BASE
++  DD  SVSM_SEC_MEM_SIZE
++  DD  SVSM_SECTION_TYPE_SNP_SEC_MEM
++
++; SEV-SNP Secrets page
++SvsmSevSnpSecrets:
++  DD  SVSM_SECRETS_BASE
++  DD  SVSM_SECRETS_SIZE
++  DD  SVSM_SECTION_TYPE_SNP_SECRETS
++
++; CPUID values
++SvsmCpuidSec:
++  DD  SVSM_CPUID_BASE
++  DD  SVSM_CPUID_SIZE
++  DD  SVSM_SECTION_TYPE_CPUID
++
++SvsmSevGuidedStructureEnd:
++
++ALIGN     16
++;
++; Padding to ensure first guid starts at 0xffffffd0
++;
++TIMES (15 - ((svsmGuidedStructureEnd - svsmGuidedStructureStart + 15) % 16)) DB 0
++
++; GUIDed structure.  To traverse this you should first verify the
++; presence of the table footer guid
++; (96b582de-1fb2-45f7-baea-a366c55a082d) at 0xffffffd0.  If that
++; is found, the two bytes at 0xffffffce are the entire table length.
++;
++; The table is composed of structures with the form:
++;
++; Data (arbitrary bytes identified by guid)
++; length from start of data to end of guid (2 bytes)
++; guid (16 bytes)
++;
++; so work back from the footer using the length to traverse until you
++; either find the guid you're looking for or run off the beginning of
++; the table.
++;
++svsmGuidedStructureStart:
++
++;
++; SEV metadata descriptor
++;
++; Provide the start offset of the metadata blob within the OVMF binary.
++
++; GUID : dc886566-984a-4798-A75e-5585a7bf67cc
++;
++SvsmSevMetadataOffsetStart:
++  DD      (fourGigabytes - SvsmSevMetadataGuid)
++  DW      SvsmSevMetadataOffsetEnd - SvsmSevMetadataOffsetStart
++  DB      0x66, 0x65, 0x88, 0xdc, 0x4a, 0x98, 0x98, 0x47
++  DB      0xA7, 0x5e, 0x55, 0x85, 0xa7, 0xbf, 0x67, 0xcc
++SvsmSevMetadataOffsetEnd:
++
++; SEV Secret block
++;
++; This describes the guest ram area where the hypervisor should
++; inject the secret.  The data format is:
++;
++; base physical address (32 bit word)
++; table length (32 bit word)
++;
++; GUID (SEV secret block): 4c2eb361-7d9b-4cc3-8081-127c90d3d294
++;
++svsmSevSecretBlockStart:
++    DD      SVSM_SECRETS_BASE
++    DD      SVSM_SECRETS_SIZE
++    DW      svsmSevSecretBlockEnd - svsmSevSecretBlockStart
++    DB      0x61, 0xB3, 0x2E, 0x4C, 0x9B, 0x7D, 0xC3, 0x4C
++    DB      0x80, 0x81, 0x12, 0x7C, 0x90, 0xD3, 0xD2, 0x94
++svsmSevSecretBlockEnd:
++
++;
++; SEV-ES Processor Reset support
++;
++; sevEsResetBlock:
++;   For the initial boot of an AP under SEV-ES, the "reset" RIP must be
++;   programmed to the RAM area defined by SEV_ES_AP_RESET_IP. The data
++;   format is:
++;
++;   IP value [0:15]
++;   CS segment base [31:16]
++;
++;   GUID (SEV-ES reset block): 00f771de-1a7e-4fcb-890e-68c77e2fb44e
++;
++;   A hypervisor reads the CS segement base and IP value. The CS segment base
++;   value represents the high order 16-bits of the CS segment base, so the
++;   hypervisor must left shift the value of the CS segement base by 16 bits to
++;   form the full CS segment base for the CS segment register. It would then
++;   program the EIP register with the IP value as read.
++;
++
++svsmSevEsResetBlockStart:
++    DD      SEV_ES_AP_RESET_IP
++    DW      svsmSevEsResetBlockEnd - svsmSevEsResetBlockStart
++    DB      0xDE, 0x71, 0xF7, 0x00, 0x7E, 0x1A, 0xCB, 0x4F
++    DB      0x89, 0x0E, 0x68, 0xC7, 0x7E, 0x2F, 0xB4, 0x4E
++svsmSevEsResetBlockEnd:
++
++;
++; SEV-SNP SVSM Info
++;
++; SVM Info:
++;   Information about the location of any SVSM region within the firmware.
++;   The SVSM region is optional but if present, provides the entry point for
++;   the AP in 32-bit protected mode. The hypervisor will detect the presence
++;   of the SVSM region and will configure the entry point of the guest
++;   accordingly. The structure format is:
++;
++;   Launch offset of entry point of SVSM from start of firmware (32-bit word)
++;
++;   GUID (SVSM Info): a789a612-0597-4c4b-a49f-cbb1fe9d1ddd
++;
++;   A hypervisor reads the CS segement base and IP value. The CS segment base
++;   value represents the high order 16-bits of the CS segment base, so the
++;   hypervisor must left shift the value of the CS segement base by 16 bits to
++;   form the full CS segment base for the CS segment register. It would then
++;   program the EIP register with the IP value as read.
++;
++
++svsmSevSnpSvsmInfoStart:
++    DD      SVSM_OFFSET
++    DW      svsmSevSnpSvsmInfoEnd - svsmSevSnpSvsmInfoStart
++    DB      0x12, 0xA6, 0x89, 0xA7, 0x97, 0x05, 0x4B, 0x4C
++    DB      0xA4, 0x9F, 0xCB, 0xB1, 0xFE, 0x9D, 0x1D, 0xDD
++svsmSevSnpSvsmInfoEnd:
++
++;
++; Table footer:
++;
++; length of whole table (16 bit word)
++; GUID (table footer): 96b582de-1fb2-45f7-baea-a366c55a082d
++;
++    DW      svsmGuidedStructureEnd - svsmGuidedStructureStart
++    DB      0xDE, 0x82, 0xB5, 0x96, 0xB2, 0x1F, 0xF7, 0x45
++    DB      0xBA, 0xEA, 0xA3, 0x66, 0xC5, 0x5A, 0x08, 0x2D
++
++svsmGuidedStructureEnd:
++
++SvsmMetadataEnd:
+\ No newline at end of file
 diff --git a/OvmfPkg/ResetVector/ResetVector.inf b/OvmfPkg/ResetVector/ResetVector.inf
-index 0f5f8fec0b..197bedfcf0 100644
+index 0f5f8fec0b..0dddf74a7c 100644
 --- a/OvmfPkg/ResetVector/ResetVector.inf
 +++ b/OvmfPkg/ResetVector/ResetVector.inf
-@@ -66,3 +66,4 @@
+@@ -66,3 +66,12 @@
    gUefiOvmfPkgTokenSpaceGuid.PcdOvmfSecSvsmCaaSize
    gUefiOvmfPkgTokenSpaceGuid.PcdOvmfSnpSecretsBase
    gUefiOvmfPkgTokenSpaceGuid.PcdOvmfSnpSecretsSize
-+  gUefiOvmfPkgTokenSpaceGuid.PcdOvmfResetVectorAddressPage
-\ No newline at end of file
++  gUefiOvmfPkgTokenSpaceGuid.PcdSvsmBase
++  gUefiOvmfPkgTokenSpaceGuid.PcdSvsmOffset
++  gUefiOvmfPkgTokenSpaceGuid.PcdSvsmSecMemBase
++  gUefiOvmfPkgTokenSpaceGuid.PcdSvsmSecMemSize
++  gUefiOvmfPkgTokenSpaceGuid.PcdSvsmSecretsBase
++  gUefiOvmfPkgTokenSpaceGuid.PcdSvsmSecretsSize
++  gUefiOvmfPkgTokenSpaceGuid.PcdSvsmCpuidBase
++  gUefiOvmfPkgTokenSpaceGuid.PcdSvsmCpuidSize
++  gUefiOvmfPkgTokenSpaceGuid.PcdSevEsApResetIp
 diff --git a/OvmfPkg/ResetVector/ResetVector.nasmb b/OvmfPkg/ResetVector/ResetVector.nasmb
-index 54745c3d09..3116e05056 100644
+index 54745c3d09..8a5575d994 100644
 --- a/OvmfPkg/ResetVector/ResetVector.nasmb
 +++ b/OvmfPkg/ResetVector/ResetVector.nasmb
-@@ -34,6 +34,10 @@
- 
- %include "CommonMacros.inc"
- 
-+%define RESET_VECTOR_TOP               (FixedPcdGet32 (PcdOvmfResetVectorAddressPage) + 0x1000)
-+%define ADDR16_OF(x)                   ((RESET_VECTOR_TOP & 0xffff) - fourGigabytes + x)
-+%define ADDR_OF(x)                     (RESET_VECTOR_TOP - fourGigabytes + x)
+@@ -144,5 +144,32 @@
+   %define SEV_LAUNCH_SECRET_SIZE  FixedPcdGet32 (PcdSevLaunchSecretSize)
+   %define SEV_FW_HASH_BLOCK_BASE  FixedPcdGet32 (PcdQemuHashTableBase)
+   %define SEV_FW_HASH_BLOCK_SIZE  FixedPcdGet32 (PcdQemuHashTableSize)
 +
- %include "PostCodes.inc"
++
++
++%ifdef SVSM_RESET_VECTOR
++  %define SVSM_BASE_ADDR                (FixedPcdGet32 (PcdSvsmBase))
++  %define SVSM_OFFSET                   (FixedPcdGet32 (PcdSvsmOffset))
++  %define SVSM_SEC_MEM_BASE             (FixedPcdGet32 (PcdSvsmSecMemBase))
++  %define SVSM_SEC_MEM_SIZE             (FixedPcdGet32 (PcdSvsmSecMemSize))
++  %define SVSM_SECRETS_BASE             (FixedPcdGet32 (PcdSvsmSecretsBase))
++  %define SVSM_SECRETS_SIZE             (FixedPcdGet32 (PcdSvsmSecretsSize))
++  %define SVSM_CPUID_BASE               (FixedPcdGet32 (PcdSvsmCpuidBase))
++  %define SVSM_CPUID_SIZE               (FixedPcdGet32 (PcdSvsmCpuidSize))
++  %define SEV_ES_AP_RESET_IP            (FixedPcdGet32 (PcdSevEsApResetIp))
++
++  %define SVSM_SEV_METADATA_VERSION           1
++  %define SVSM_SECTION_TYPE_SNP_SEC_MEM     0x1
++  %define SVSM_SECTION_TYPE_SNP_SECRETS     0x2
++  %define SVSM_SECTION_TYPE_CPUID           0x3
++%endif
++
++%include "Ia16/Launch.asm"
++%include "Ia16/OvmfMetadata.asm"
++
++%ifdef SVSM_RESET_VECTOR
++  %include "Ia16/SvsmMetadata.asm"
++%endif
++
+ %include "Ia16/ResetVectorVtf0.asm"
  
- %ifdef DEBUG_PORT80
-diff --git a/UefiCpuPkg/ResetVector/Vtf0/Ia32/SearchForBfvBase.asm b/UefiCpuPkg/ResetVector/Vtf0/Ia32/SearchForBfvBase.asm
-index 60f3f2e0bd..80200b4aba 100644
---- a/UefiCpuPkg/ResetVector/Vtf0/Ia32/SearchForBfvBase.asm
-+++ b/UefiCpuPkg/ResetVector/Vtf0/Ia32/SearchForBfvBase.asm
-@@ -31,7 +31,7 @@ BITS    32
- ;
- Flat32SearchForBfvBase:
- 
--    xor     eax, eax
-+    mov     eax, RESET_VECTOR_TOP
- searchingForBfvHeaderLoop:
-     ;
-     ; We check for a firmware volume at every 4KB address in the top 16MB
-@@ -75,6 +75,7 @@ checkingFvLength:
-     jne     searchingForBfvHeaderLoop
-     mov     ebx, eax
-     add     ebx, dword [eax + 0x20]
-+    cmp     ebx, RESET_VECTOR_TOP & 0xffffffff
-     jnz     searchingForBfvHeaderLoop
- 
-     jmp     searchedForBfvHeaderAndItWasFound

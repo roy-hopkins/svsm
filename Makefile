@@ -17,7 +17,7 @@ KERNEL_ELF = "target/svsm-target/${TARGET_PATH}/svsm"
 
 STAGE1_OBJS = stage1/stage1.o stage1/reset.o
 
-all: svsm.bin ovmf/SVSM_CODE.fd
+all: svsm.bin ovmf
 
 test:
 	cd src/
