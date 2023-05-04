@@ -36,11 +36,11 @@ stage1/stage2.bin:
 	cargo build ${CARGO_ARGS} --bin stage2
 	objcopy -O binary ${STAGE2_ELF} $@
 
-stage1/kernel.bin:
+stage1/kernel.elf:
 	cargo build ${CARGO_ARGS} --bin svsm
-	objcopy -O binary ${KERNEL_ELF} $@
+	objcopy -O elf64-x86-64 --strip-unneeded ${KERNEL_ELF} $@
 
-stage1/stage1.o: stage1/stage1.S stage1/stage2.bin stage1/kernel.bin
+stage1/stage1.o: stage1/stage1.S stage1/stage2.bin stage1/kernel.elf
 stage1/reset.o:  stage1/reset.S stage1/meta.bin
 
 stage1/stage1: ${STAGE1_OBJS}
@@ -58,4 +58,4 @@ clean:
 	cargo clean
 	rm -f stage1/stage2.bin svsm.bin stage1/meta.bin ${STAGE1_OBJS} gen_meta ${OVMF_OUTPUT_DIR}/*.fd
 
-.PHONY: stage1/stage2.bin stage1/kernel.bin svsm.bin clean ovmf
+.PHONY: stage1/stage2.bin stage1/kernel.elf svsm.bin clean ovmf
