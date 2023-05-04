@@ -11,13 +11,13 @@ export CC=/usr/bin/gcc-7
 
 # First build requires some initialisation
 if [ ! -d "$SCRIPT_DIR/../edk2/BaseTools/Source/C/bin" ]; then
-    git submodule update --init    
+    git submodule update --init --recursive
     make -C BaseTools -j $(nproc)
     patch -p1 -i ../ovmf/svsm_edk2.patch
 fi
 
 unset WORKSPACE
-source edksetup.sh BaseTools
+source edksetup.sh --reconfig
 
 if [ $1 == "debug" ]; then
     build -a X64 -b DEBUG -t GCC5 -D DEBUG_ON_SERIAL_PORT -D DEBUG_VERBOSE -p OvmfPkg/OvmfPkgSvsmX64.dsc
