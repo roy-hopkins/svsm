@@ -14,13 +14,9 @@ if [ ! -d "$SCRIPT_DIR/../edk2/BaseTools/Source/C/bin" ]; then
     git submodule update --init    
     make -C BaseTools -j $(nproc)
     patch -p1 -i ../ovmf/svsm_edk2.patch
-    cd OvmfPkg
-    ln -s ../../ovmf/OvmfPkg/OvmfPkgSvsmX64.dsc OvmfPkgSvsmX64.dsc
-    ln -s ../../ovmf/OvmfPkg/OvmfPkgSvsmX64.fdf OvmfPkgSvsmX64.fdf
-    ln -s ../../ovmf/OvmfPkg/SvsmResetVector SvsmResetVector
-    cd ..
 fi
 
+unset WORKSPACE
 source edksetup.sh BaseTools
 
 if [ $1 == "debug" ]; then
