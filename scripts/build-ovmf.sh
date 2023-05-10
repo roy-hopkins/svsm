@@ -8,7 +8,7 @@ if [[ $1 == "debug" ]]; then
 else
     LOG_FILE="ovmf_release.build"
 fi
-rm $LOG_FILE
+rm -f $LOG_FILE
 
 pushd $SCRIPT_DIR/../edk2
 
