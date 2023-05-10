@@ -4,14 +4,15 @@
 //
 // Author: Roy Hopkins <roy.hopkins@suse.com>
 
-use crate::types::{PhysAddr, GUEST_VMPL};
+use crate::address::PhysAddr;
+use crate::types::GUEST_VMPL;
 use crate::cpu::percpu::this_cpu_mut;
 use crate::requests::update_mappings;
 use crate::error::SvsmError;
 
 use super::{SevOVMFMetaData, parse_ovmf_meta_data, print_ovmf_meta, validate_ovmf_memory};
 
-const OVMF_ENTRY: PhysAddr = 0xffffeff0;
+const OVMF_ENTRY : u64 = 0xffffeff0;
 
 pub struct OvmfFw {
     ovmf_meta: SevOVMFMetaData
@@ -53,7 +54,7 @@ impl OvmfFw {
     pub fn prepare_launch(self: &Self) -> Result<(), SvsmError> {
         let caa = self.ovmf_meta.caa_page.unwrap();
         let cpu = this_cpu_mut();
-        cpu.set_reset_ip(OVMF_ENTRY as u64);
+        cpu.set_reset_ip(OVMF_ENTRY);
     
         cpu.alloc_guest_vmsa()?;
         cpu.update_guest_caa(caa);

@@ -4,10 +4,8 @@
 //
 // Author: Joerg Roedel <jroedel@suse.de>
 
+pub mod bitmap_allocator;
 pub mod immut_after_init;
 pub mod util;
 
-pub use util::{
-    align_up, crosses_page, ffs, halt, is_aligned, overlap, page_align, page_align_up, page_offset,
-    zero_mem_region,
-};
+pub use util::{align_up, ffs, halt, overlap, zero_mem_region};

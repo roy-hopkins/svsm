@@ -4,8 +4,7 @@
 //
 // Author: Joerg Roedel <jroedel@suse.de>
 
-use crate::error::SvsmError;
-use crate::types::{PhysAddr, VirtAddr};
+use crate::address::{Address, PhysAddr, VirtAddr};
 use crate::utils::immut_after_init::ImmutAfterInitCell;
 
 #[derive(Copy, Clone)]
@@ -18,9 +17,9 @@ struct KernelMapping {
 impl KernelMapping {
     pub const fn new() -> Self {
         KernelMapping {
-            virt_start: 0,
-            virt_end: 0,
-            phys_start: 0,
+            virt_start: VirtAddr::null(),
+            virt_end: VirtAddr::null(),
+            phys_start: PhysAddr::null(),
         }
     }
 }
@@ -28,7 +27,7 @@ impl KernelMapping {
 static KERNEL_MAPPING: ImmutAfterInitCell<KernelMapping> =
     ImmutAfterInitCell::new(KernelMapping::new());
 
-pub fn init_kernel_mapping_info(vstart: VirtAddr, vend: VirtAddr, pstart: VirtAddr) {
+pub fn init_kernel_mapping_info(vstart: VirtAddr, vend: VirtAddr, pstart: PhysAddr) {
     let km = KernelMapping {
         virt_start: vstart,
         virt_end: vend,
@@ -46,18 +45,18 @@ pub fn virt_to_phys(vaddr: VirtAddr) -> PhysAddr {
 
     let offset: usize = vaddr - KERNEL_MAPPING.virt_start;
 
-    KERNEL_MAPPING.phys_start + offset
+    KERNEL_MAPPING.phys_start.offset(offset)
 }
 
 pub fn phys_to_virt(paddr: PhysAddr) -> VirtAddr {
     let size: usize = KERNEL_MAPPING.virt_end - KERNEL_MAPPING.virt_start;
-    if paddr < KERNEL_MAPPING.phys_start || paddr >= KERNEL_MAPPING.phys_start + size {
+    if paddr < KERNEL_MAPPING.phys_start || paddr >= KERNEL_MAPPING.phys_start.offset(size) {
         panic!("Invalid physical address {:#018x}", paddr);
     }
 
     let offset: usize = paddr - KERNEL_MAPPING.phys_start;
 
-    KERNEL_MAPPING.virt_start + offset
+    KERNEL_MAPPING.virt_start.offset(offset)
 }
 
 // Address space definitions for SVSM virtual memory layout
@@ -140,23 +139,3 @@ pub const SVSM_PERCPU_TEMP_END_4K: usize = SVSM_PERCPU_TEMP_BASE_4K + SIZE_LEVEL
 /// Start and End for PAGE_SIZEed temporary mappings
 pub const SVSM_PERCPU_TEMP_BASE_2M: usize = SVSM_PERCPU_TEMP_BASE + SIZE_LEVEL1;
 pub const SVSM_PERCPU_TEMP_END_2M: usize = SVSM_PERCPU_TEMP_BASE + SIZE_LEVEL2;
-
-/// Number of slots - only use half of them to leave guard pages between the mappings
-pub const SVSM_PERCPU_TEMP_4K_SLOTS: usize =
-    ((SVSM_PERCPU_TEMP_END_4K - SVSM_PERCPU_TEMP_BASE_4K) / PAGE_SIZE) / 2;
-pub const SVSM_PERCPU_TEMP_2M_SLOTS: usize =
-    ((SVSM_PERCPU_TEMP_END_2M - SVSM_PERCPU_TEMP_BASE_2M) / PAGE_SIZE_2M) / 2;
-
-pub fn percpu_4k_slot_addr(slot: usize) -> Result<VirtAddr, SvsmError> {
-    if slot >= SVSM_PERCPU_TEMP_4K_SLOTS {
-        return Err(SvsmError::Mem);
-    }
-    Ok(SVSM_PERCPU_TEMP_BASE_4K + (2 * slot * PAGE_SIZE))
-}
-
-pub fn percpu_2m_slot_addr(slot: usize) -> Result<VirtAddr, SvsmError> {
-    if slot >= SVSM_PERCPU_TEMP_2M_SLOTS {
-        return Err(SvsmError::Mem);
-    }
-    Ok(SVSM_PERCPU_TEMP_BASE_2M + (2 * slot * PAGE_SIZE_2M))
-}

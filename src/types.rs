@@ -7,6 +7,7 @@
 use crate::sev::vmsa::VMPL_MAX;
 
 pub const PAGE_SHIFT: usize = 12;
+pub const PAGE_SHIFT_2M: usize = 21;
 pub const PAGE_SIZE: usize = 1 << PAGE_SHIFT;
 pub const PAGE_SIZE_2M: usize = PAGE_SIZE * 512;
 
@@ -25,8 +26,5 @@ pub const GUEST_VMPL: usize = 1;
 
 #[allow(clippy::assertions_on_constants)]
 const _: () = assert!(GUEST_VMPL > 0 && GUEST_VMPL < VMPL_MAX);
-
-pub type PhysAddr = usize;
-pub type VirtAddr = usize;
 
 pub const MAX_CPUS: usize = 512;
