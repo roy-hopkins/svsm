@@ -6,7 +6,7 @@ OVMF_BUILD_DIR=edk2/Build/OvmfSvsmX64/RELEASE_GCC5/FV
 OVMF_OUTPUT_DIR=ovmf/release
 else
 TARGET_PATH="debug"
-CARGO_ARGS=
+CARGO_ARGS=--features enable-gdb
 OVMF_BUILD_ARGS=debug
 OVMF_BUILD_DIR=edk2/Build/OvmfSvsmX64/DEBUG_GCC5/FV
 OVMF_OUTPUT_DIR=ovmf/debug
