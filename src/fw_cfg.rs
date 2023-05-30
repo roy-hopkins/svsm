@@ -115,8 +115,8 @@ impl<'a> FwCfg<'a> {
         val
     }
 
-    pub fn read_char(&self) -> char {
-        self.driver.inb(FW_CFG_DATA) as char
+    pub fn read_byte(&self) -> u8 {
+        self.driver.inb(FW_CFG_DATA)
     }
 
     pub fn file_selector(&self, name: &str) -> Result<FwCfgFile, SvsmError> {
@@ -129,7 +129,7 @@ impl<'a> FwCfg<'a> {
             let _unused: u16 = self.read_be();
             let mut fs = FixedString::<56>::new();
             for _ in 0..56 {
-                let c = self.read_char();
+                let c = self.read_byte();
                 fs.push(c);
             }
 

@@ -33,4 +33,6 @@ pub enum SvsmError {
     Acpi,
     // Errors from file systems
     FileSystem(FsError),
+    // String conversion errors
+    String,
 }
