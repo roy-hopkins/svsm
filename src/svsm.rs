@@ -394,9 +394,20 @@ pub extern "C" fn svsm_start(li: &KernelLaunchInfo, mi: &MigrateInfo) {
     }
     idt_init();
 
+    CONSOLE_SERIAL
+        .init(&SerialPort {
+            driver: &CONSOLE_IO,
+            port: debug_serial_port,
+        })
+        .expect("console serial output already configured");
+
     WRITER.lock().set(&*CONSOLE_SERIAL);
 
-    init_console();
+    #[cfg(feature = "enable-console-log")]
+    {
+        init_console();
+    }
+
     install_buffer_logger("SVSM");
 
     log::info!("COCONUT Secure Virtual Machine Service Module (SVSM)");

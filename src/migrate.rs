@@ -2,7 +2,8 @@
 //
 // Copyright (c) 2022-2023 SUSE LLC
 //
-//
+// Author: Vasant Karasulli <vkarasulli@suse.de>
+
 use crate::address::VirtAddr;
 use crate::locking::SpinLock;
 use crate::log_buffer::LogBuffer;
@@ -10,6 +11,7 @@ use crate::log_buffer::LogBuffer;
 // struct containing information that
 // is migrated from stage2 to svsm kernel
 #[repr(C)]
+#[derive(Clone, Copy, Debug)]
 pub struct MigrateInfo {
     pub bitmap_addr: VirtAddr,
     pub log_buf: &'static SpinLock<LogBuffer>,

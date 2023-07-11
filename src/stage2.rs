@@ -106,11 +106,19 @@ fn setup_env(config: &SvsmConfig) {
 
     // Init IDT again with handlers requiring GHCB (eg. #VC handler)
     early_idt_init();
-    unsafe {
-        WRITER.lock().set(&mut CONSOLE_SERIAL);
-    }
+    CONSOLE_SERIAL
+        .init(&SerialPort {
+            driver: &CONSOLE_IO,
+            port: config.debug_serial_port(),
+        })
+        .expect("console serial output already configured");
 
-    init_console();
+    WRITER.lock().set(&*CONSOLE_SERIAL);
+
+    #[cfg(feature = "enable-console-log")]
+    {
+        init_console();
+    }
 
     install_buffer_logger("Stage2");
 
