@@ -38,6 +38,20 @@ pub enum TaskState {
     TERMINATED,
 }
 
+#[derive(Clone, Copy, Debug)]
+pub enum TaskError {
+    // Attempt to close a non-terminated task
+    NotTerminated,
+    // A closed task could not be removed from the task list
+    CloseFailed,
+}
+
+impl From<TaskError> for SvsmError {
+    fn from(e: TaskError) -> Self {
+        Self::Task(e)
+    }
+}
+
 #[derive(Debug)]
 pub struct TaskStack {
     pub virt_base: VirtAddr,
