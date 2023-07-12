@@ -10,6 +10,7 @@ use core::cell::RefCell;
 
 use super::Task;
 use super::{tasks::TaskRuntime, TaskState, INITIAL_TASK_ID};
+use crate::cpu::percpu::{this_cpu, this_cpu_mut};
 use crate::error::SvsmError;
 use crate::locking::SpinLock;
 use alloc::boxed::Box;
@@ -220,5 +221,25 @@ pub fn create_task(
         task: RefCell::new(task),
     });
     TASKLIST.lock().list().push_front(node.clone());
+    // Allocate any unallocated tasks (including the newly created one)
+    // to the current CPU
+    this_cpu_mut().runqueue.allocate(this_cpu().get_apic_id());
+    schedule();
+
     Ok(node)
+}
+
+/// Check to see if the task scheduled on the current processor has the given id
+pub fn is_current_task(id: u32) -> bool {
+    match &this_cpu().runqueue.current_task {
+        Some(current_task) => current_task.task.borrow().id == id,
+        None => id == INITIAL_TASK_ID,
+    }
+}
+
+pub fn schedule() {
+    let (next_task, current_task) = this_cpu_mut().runqueue.schedule();
+    if let Some(next_task) = next_task {
+        unsafe { (*next_task).set_current(current_task) };
+    }
 }

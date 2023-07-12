@@ -34,7 +34,6 @@ const STACK_SIZE: usize = 65536;
 #[derive(PartialEq, Debug, Copy, Clone)]
 pub enum TaskState {
     RUNNING,
-    SCHEDULED,
     TERMINATED,
 }
 
@@ -98,17 +97,9 @@ pub trait TaskRuntime {
     /// update the runtime calculation at this point.
     fn schedule_out(&mut self);
 
-    /// Returns whether this is the first time a task has been
-    /// considered for scheduling.
-    fn first(&self) -> bool;
-
     /// Overrides the calculated runtime value with the given value.
     /// This can be used to set or adjust the runtime of a task.
     fn set(&mut self, runtime: u64);
-
-    /// Flag the runtime as terminated so the scheduler does not
-    /// find terminated tasks before running tasks.
-    fn terminated(&mut self);
 
     /// Returns a value that represents the amount of CPU the task
     /// has been allocated
@@ -131,16 +122,8 @@ impl TaskRuntime for TscRuntime {
         self.runtime += rdtsc() - self.runtime;
     }
 
-    fn first(&self) -> bool {
-        self.runtime == 0
-    }
-
     fn set(&mut self, runtime: u64) {
         self.runtime = runtime;
-    }
-
-    fn terminated(&mut self) {
-        self.runtime = u64::MAX;
     }
 
     fn value(&self) -> u64 {
@@ -163,16 +146,8 @@ impl TaskRuntime for CountRuntime {
 
     fn schedule_out(&mut self) {}
 
-    fn first(&self) -> bool {
-        self.count == 0
-    }
-
     fn set(&mut self, runtime: u64) {
         self.count = runtime;
-    }
-
-    fn terminated(&mut self) {
-        self.count = u64::MAX;
     }
 
     fn value(&self) -> u64 {
