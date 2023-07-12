@@ -27,6 +27,8 @@ use crate::mm::{
 };
 use crate::utils::zero_mem_region;
 
+use super::schedule::{current_task_terminated, schedule};
+
 pub const INITIAL_TASK_ID: u32 = 1;
 
 const STACK_SIZE: usize = 65536;
@@ -308,7 +310,10 @@ impl Task {
 }
 
 extern "C" fn task_exit() {
-    panic!("Current task has exited");
+    unsafe {
+        current_task_terminated();
+    }
+    schedule();
 }
 
 #[allow(unused)]

@@ -44,6 +44,7 @@ impl<'a> KeyAdapter<'a> for TaskTreeAdapter {
 pub struct RunQueue {
     tree: Option<RBTree<TaskTreeAdapter>>,
     current_task: Option<TaskPointer>,
+    terminated_task: Option<TaskPointer>,
 }
 
 impl RunQueue {
@@ -51,6 +52,7 @@ impl RunQueue {
         Self {
             tree: None,
             current_task: None,
+            terminated_task: None,
         }
     }
 
@@ -127,13 +129,30 @@ impl RunQueue {
 
     fn update_current_task(&mut self) -> Option<TaskPointer> {
         let task_node = self.current_task.take()?;
-        task_node.task.borrow_mut().runtime.schedule_out();
+        let task_state = {
+            let mut task = task_node.task.borrow_mut();
+            task.runtime.schedule_out();
+            task.state
+        };
 
-        // Reinsert the node into the tree so the position is updated with the new rutime
-        let mut task_cursor = unsafe { self.tree().cursor_mut_from_ptr(task_node.as_ref()) };
-        task_cursor.remove();
-        self.tree().insert(task_node.clone());
-        Some(task_node)
+        if task_state == TaskState::TERMINATED {
+            // The current task has terminated. Make sure it doesn't get added back
+            // into the runtime tree, but also we need to make sure we keep a
+            // reference to the task because the current stack is owned by it.
+            // Put it in a holding location which will be cleared by the next
+            // active task.
+            unsafe {
+                self.deallocate(task_node.clone());
+            }
+            self.terminated_task = Some(task_node);
+            None
+        } else {
+            // Reinsert the node into the tree so the position is updated with the new rutime
+            let mut task_cursor = unsafe { self.tree().cursor_mut_from_ptr(task_node.as_ref()) };
+            task_cursor.remove();
+            self.tree().insert(task_node.clone());
+            Some(task_node)
+        }
     }
 
     /// Helper function that determines if a task is a candidate for allocating
@@ -172,6 +191,18 @@ impl RunQueue {
                     .insert(cursor.as_cursor().clone_pointer().unwrap());
             }
         }
+    }
+
+    /// Deallocate a task from a per CPU runqueue but leave it in the global task list
+    /// where it can be reallocated if still in the RUNNING state.
+    ///
+    /// # Safety
+    /// This function is marked as unsafe as it will dereference an invalid pointer if
+    /// called with a task_node that is not contained within this queue.
+    pub unsafe fn deallocate(&mut self, task_node: TaskPointer) {
+        let mut cursor = self.tree().cursor_mut_from_ptr(task_node.as_ref());
+        cursor.remove();
+        task_node.task.borrow_mut().allocation = None;
     }
 }
 
@@ -237,9 +268,29 @@ pub fn is_current_task(id: u32) -> bool {
     }
 }
 
+pub unsafe fn current_task_terminated() {
+    let task_node = this_cpu_mut()
+        .runqueue
+        .current_task
+        .as_mut()
+        .expect("Task termination handler called when there is no current task");
+
+    // Set the task state as terminated. The task context is still current until
+    // schedule() is called which will then keep a reference until some time
+    // after the task has been switched.
+    task_node.task.borrow_mut().state = TaskState::TERMINATED;
+    let mut tl = TASKLIST.lock();
+    let mut cursor = unsafe { tl.list().cursor_mut_from_ptr(task_node.as_ref()) };
+    cursor.remove();
+}
+
 pub fn schedule() {
     let (next_task, current_task) = this_cpu_mut().runqueue.schedule();
     if let Some(next_task) = next_task {
         unsafe { (*next_task).set_current(current_task) };
     }
+
+    // We're now in the context of the new task. If the previous task had terminated
+    // then we can release it's reference here.
+    let _ = this_cpu_mut().runqueue.terminated_task.take();
 }
