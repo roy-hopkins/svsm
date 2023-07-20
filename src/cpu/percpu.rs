@@ -27,10 +27,13 @@ use crate::sev::utils::RMPFlags;
 use crate::sev::vmsa::{allocate_new_vmsa, VMSASegment, VMSA};
 use crate::task::RunQueue;
 use crate::types::{PAGE_SHIFT, PAGE_SHIFT_2M, PAGE_SIZE, PAGE_SIZE_2M, SVSM_TR_FLAGS, SVSM_TSS};
+use crate::utils::bitmap_allocator::BitmapAllocator1024;
 use alloc::vec::Vec;
 use core::cell::UnsafeCell;
 use core::ptr;
 use core::sync::atomic::{AtomicBool, Ordering};
+
+type PerCPUVirtualRange = VirtualRange<BitmapAllocator1024>;
 
 #[derive(Debug)]
 struct PerCpuInfo {
@@ -185,9 +188,9 @@ pub struct PerCpu {
     reset_ip: u64,
 
     /// Address allocator for per-cpu 4k temporary mappings
-    pub vrange_4k: VirtualRange,
+    pub vrange_4k: PerCPUVirtualRange,
     /// Address allocator for per-cpu 2m temporary mappings
-    pub vrange_2m: VirtualRange,
+    pub vrange_2m: PerCPUVirtualRange,
 
     /// Task list that has been assigned for scheduling on this CPU
     pub runqueue: RunQueue,
@@ -206,8 +209,8 @@ impl PerCpu {
             svsm_vmsa: None,
             guest_vmsa: SpinLock::new(GuestVmsaRef::new()),
             reset_ip: 0xffff_fff0u64,
-            vrange_4k: VirtualRange::new(),
-            vrange_2m: VirtualRange::new(),
+            vrange_4k: PerCPUVirtualRange::new(),
+            vrange_2m: PerCPUVirtualRange::new(),
             runqueue: RunQueue::new(),
         }
     }
@@ -491,7 +494,7 @@ impl PerCpu {
     pub fn virt_range_init(&mut self) {
         // Initialize 4k range
         let page_count = (SVSM_PERCPU_TEMP_END_4K - SVSM_PERCPU_TEMP_BASE_4K) / PAGE_SIZE;
-        assert!(page_count <= VirtualRange::CAPACITY);
+        assert!(page_count <= PerCPUVirtualRange::CAPACITY);
         self.vrange_4k.init(
             VirtAddr::from(SVSM_PERCPU_TEMP_BASE_4K),
             page_count,
@@ -500,7 +503,7 @@ impl PerCpu {
 
         // Initialize 2M range
         let page_count = (SVSM_PERCPU_TEMP_END_2M - SVSM_PERCPU_TEMP_BASE_2M) / PAGE_SIZE_2M;
-        assert!(page_count <= VirtualRange::CAPACITY);
+        assert!(page_count <= PerCPUVirtualRange::CAPACITY);
         self.vrange_2m.init(
             VirtAddr::from(SVSM_PERCPU_TEMP_BASE_2M),
             page_count,

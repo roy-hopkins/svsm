@@ -8,7 +8,7 @@ use crate::address::VirtAddr;
 use crate::cpu::percpu::{this_cpu, this_cpu_mut};
 use crate::error::SvsmError;
 use crate::types::{PAGE_SHIFT, PAGE_SHIFT_2M, PAGE_SIZE, PAGE_SIZE_2M};
-use crate::utils::bitmap_allocator::{BitmapAllocator, BitmapAllocator1024};
+use crate::utils::bitmap_allocator::{BitmapAllocator, BitmapAllocator1024, BitmapAllocator16K};
 use core::fmt::Debug;
 
 use super::{
@@ -20,17 +20,17 @@ pub const VIRT_ALIGN_4K: usize = PAGE_SHIFT - 12;
 pub const VIRT_ALIGN_2M: usize = PAGE_SHIFT_2M - 12;
 
 #[derive(Debug)]
-pub struct VirtualRange {
+pub struct VirtualRange<T> {
     start_virt: VirtAddr,
     page_count: usize,
     page_shift: usize,
-    bits: BitmapAllocator1024,
+    bits: T,
 }
 
-impl VirtualRange {
+impl VirtualRange<BitmapAllocator1024> {
     pub const CAPACITY: usize = BitmapAllocator1024::CAPACITY;
 
-    pub const fn new() -> VirtualRange {
+    pub const fn new() -> Self {
         VirtualRange {
             start_virt: VirtAddr::null(),
             page_count: 0,
@@ -38,7 +38,22 @@ impl VirtualRange {
             bits: BitmapAllocator1024::new(),
         }
     }
+}
 
+impl VirtualRange<BitmapAllocator16K> {
+    pub const CAPACITY: usize = BitmapAllocator16K::CAPACITY;
+
+    pub const fn new() -> Self {
+        VirtualRange {
+            start_virt: VirtAddr::null(),
+            page_count: 0,
+            page_shift: PAGE_SHIFT,
+            bits: BitmapAllocator16K::new(),
+        }
+    }
+}
+
+impl<T: BitmapAllocator> VirtualRange<T> {
     pub fn init(&mut self, start_virt: VirtAddr, page_count: usize, page_shift: usize) {
         self.start_virt = start_virt;
         self.page_count = page_count;

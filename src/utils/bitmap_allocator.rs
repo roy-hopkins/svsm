@@ -21,6 +21,7 @@ pub trait BitmapAllocator {
 }
 
 pub type BitmapAllocator1024 = BitmapAllocatorTree<BitmapAllocator64>;
+pub type BitmapAllocator16K = BitmapAllocatorTree<BitmapAllocator1024>;
 
 #[derive(Debug)]
 pub struct BitmapAllocator64 {
@@ -30,6 +31,32 @@ pub struct BitmapAllocator64 {
 impl BitmapAllocator64 {
     pub const fn new() -> Self {
         Self { bits: u64::MAX }
+    }
+}
+
+impl BitmapAllocatorTree<BitmapAllocator1024> {
+    pub const fn new() -> Self {
+        Self {
+            bits: u16::MAX,
+            child: [
+                BitmapAllocator1024::new(),
+                BitmapAllocator1024::new(),
+                BitmapAllocator1024::new(),
+                BitmapAllocator1024::new(),
+                BitmapAllocator1024::new(),
+                BitmapAllocator1024::new(),
+                BitmapAllocator1024::new(),
+                BitmapAllocator1024::new(),
+                BitmapAllocator1024::new(),
+                BitmapAllocator1024::new(),
+                BitmapAllocator1024::new(),
+                BitmapAllocator1024::new(),
+                BitmapAllocator1024::new(),
+                BitmapAllocator1024::new(),
+                BitmapAllocator1024::new(),
+                BitmapAllocator1024::new(),
+            ],
+        }
     }
 }
 
@@ -98,7 +125,6 @@ impl BitmapAllocatorTree<BitmapAllocator64> {
     pub const fn new() -> Self {
         Self {
             bits: u16::MAX,
-            // FIXME: Is there a better way of doing this in rust?
             child: [
                 BitmapAllocator64::new(),
                 BitmapAllocator64::new(),
