@@ -212,7 +212,7 @@ impl fmt::Debug for Task {
 }
 
 impl Task {
-    pub fn create(entry: extern "C" fn(), flags: u16) -> Result<Box<Task>, SvsmError> {
+    pub fn create(entry: usize, flags: u16) -> Result<Box<Task>, SvsmError> {
         let mut pgtable = if (flags & TASK_FLAG_SHARE_PT) != 0 {
             this_cpu().get_pgtable().clone_shared()?
         } else {
@@ -258,7 +258,7 @@ impl Task {
     }
 
     fn allocate_stack(
-        entry: extern "C" fn(),
+        entry: usize,
         pgtable: &mut PageTableRef,
     ) -> Result<(TaskStack, VirtAddr), SvsmError> {
         let stack_size = SVSM_PERTASK_STACK_TOP - SVSM_PERTASK_STACK_BASE;
@@ -292,7 +292,7 @@ impl Task {
             // flags
             stack_ptr.offset(-3).write(read_flags());
             // ret_addr
-            stack_ptr.offset(-2).write(entry as *const () as u64);
+            stack_ptr.offset(-2).write(entry as u64);
             // Task termination handler for when entry point returns
             stack_ptr.offset(-1).write(task_exit as *const () as u64);
         }

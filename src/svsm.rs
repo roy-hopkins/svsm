@@ -11,6 +11,7 @@ extern crate alloc;
 
 use alloc::vec::Vec;
 use svsm::fw_meta::{parse_fw_meta_data, print_fw_meta, validate_fw_memory, SevFWMetaData};
+use svsm::syscall::SyscallHandler;
 
 use core::arch::global_asm;
 use core::panic::PanicInfo;
@@ -38,6 +39,7 @@ use svsm::mm::memory::init_memory_map;
 use svsm::mm::pagetable::paging_init;
 use svsm::mm::virtualrange::virt_log_usage;
 use svsm::mm::{init_kernel_mapping_info, PerCPUPageMappingGuard};
+use svsm::module::ModuleLoader;
 use svsm::requests::{request_loop, update_mappings};
 use svsm::serial::SerialPort;
 use svsm::serial::SERIAL_PORT;
@@ -427,6 +429,10 @@ pub extern "C" fn svsm_main() {
 
     populate_ram_fs(LAUNCH_INFO.kernel_fs_start, LAUNCH_INFO.kernel_fs_end)
         .expect("Failed to unpack FS archive");
+
+    SyscallHandler::init();
+
+    ModuleLoader::enumerate().expect("Failed to initialise loadable modules");
 
     let cpus = load_acpi_cpu_info(&fw_cfg).expect("Failed to load ACPI tables");
     let mut nr_cpus = 0;

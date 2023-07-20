@@ -10,9 +10,13 @@ use core::cell::RefCell;
 
 use super::Task;
 use super::{tasks::TaskRuntime, TaskState, INITIAL_TASK_ID};
+use crate::address::{Address, VirtAddr};
 use crate::cpu::percpu::{this_cpu, this_cpu_mut};
+use crate::elf;
 use crate::error::SvsmError;
 use crate::locking::SpinLock;
+use crate::mm::pagetable::PageTable;
+use crate::mm::virt_to_phys;
 use alloc::boxed::Box;
 use alloc::rc::Rc;
 use intrusive_collections::linked_list::Link;
@@ -252,8 +256,66 @@ pub fn create_task(
     flags: u16,
     affinity: Option<u32>,
 ) -> Result<TaskPointer, SvsmError> {
-    let mut task = Task::create(entry, flags)?;
+    let mut task = Task::create(entry as usize, flags)?;
     task.set_affinity(affinity);
+    let node = Rc::new(TaskNode {
+        tree_link: RBTreeLink::default(),
+        list_link: Link::default(),
+        task: RefCell::new(task),
+    });
+    {
+        // Ensure the tasklist lock is released before schedule() is called
+        // otherwise the lock will be held when switching to a new context
+        let mut tl = TASKLIST.lock();
+        tl.list().push_front(node.clone());
+        // Allocate any unallocated tasks (including the newly created one)
+        // to the current CPU
+        this_cpu_mut()
+            .runqueue
+            .allocate(this_cpu().get_apic_id(), tl.list());
+    }
+    schedule();
+
+    Ok(node)
+}
+
+pub fn create_elf_task(
+    buf: &[u8],
+    flags: u16,
+    affinity: Option<u32>,
+) -> Result<TaskPointer, SvsmError> {
+    let elf = match elf::Elf64File::read(buf) {
+        Ok(elf) => elf,
+        Err(_) => return Err(SvsmError::Module),
+    };
+    let default_base = elf.default_base();
+    let entry = elf.get_entry(default_base);
+
+    let mut task = Task::create(entry as usize, flags)?;
+    task.set_affinity(affinity);
+
+    // Setup the pagetable for the virtual memory ranges described in the file
+    for segment in elf.image_load_segment_iter(default_base) {
+        let vaddr_start = VirtAddr::from(segment.vaddr_range.vaddr_begin);
+        let vaddr_end = VirtAddr::from(segment.vaddr_range.vaddr_end);
+        let aligned_vaddr_end = vaddr_end.page_align_up();
+        let flags = if segment.flags.contains(elf::Elf64PhdrFlags::EXECUTE) {
+            PageTable::exec_flags()
+        } else if segment.flags.contains(elf::Elf64PhdrFlags::WRITE) {
+            PageTable::data_flags()
+        } else {
+            PageTable::data_ro_flags()
+        };
+
+        let phys = virt_to_phys(VirtAddr::from(
+            (&buf[0] as *const u8) as u64 + segment.file_range.offset_begin as u64,
+        ));
+        task.page_table
+            .lock()
+            .map_region(vaddr_start, aligned_vaddr_end, phys, flags)
+            .expect("Failed to map kernel ELF segment");
+    }
+
     let node = Rc::new(TaskNode {
         tree_link: RBTreeLink::default(),
         list_link: Link::default(),
