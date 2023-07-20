@@ -5,9 +5,10 @@
 // Author: Joerg Roedel <jroedel@suse.de>
 
 extern crate alloc;
+use crate::address::VirtAddr;
+use crate::task::TaskPointer;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
-
 use core::fmt::Debug;
 
 use crate::error::SvsmError;
@@ -17,6 +18,12 @@ use packit::PackItError;
 /// Maximum supported length for a single filename
 const MAX_FILENAME_LENGTH: usize = 64;
 pub type FileName = FixedString<MAX_FILENAME_LENGTH>;
+
+pub enum FileViewPermission {
+    Read,
+    Write,
+    Execute,
+}
 
 #[derive(Copy, Clone, Debug)]
 pub enum FsError {
@@ -63,6 +70,15 @@ pub trait File: Debug {
     fn write(&self, buf: &[u8], offset: usize) -> Result<usize, SvsmError>;
     fn truncate(&self, size: usize) -> Result<usize, SvsmError>;
     fn size(&self) -> usize;
+    fn map_view(
+        &self,
+        addr: VirtAddr,
+        offset: usize,
+        size: usize,
+        task: TaskPointer,
+        permission: FileViewPermission,
+    ) -> Result<(), SvsmError>;
+    fn unmap_view(&self, addr: VirtAddr, size: usize, task: TaskPointer) -> Result<(), SvsmError>;
 }
 
 pub trait Directory: Debug {
