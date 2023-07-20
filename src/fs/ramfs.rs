@@ -6,9 +6,12 @@
 
 use super::*;
 
+use crate::address::VirtAddr;
 use crate::error::SvsmError;
 use crate::locking::RWLock;
+use crate::mm::pagetable::PageTable;
 use crate::mm::{allocate_file_page_ref, PageRef};
+use crate::task::TaskPointer;
 use crate::types::PAGE_SIZE;
 use crate::utils::{page_align_up, page_offset, zero_mem_region};
 
@@ -164,6 +167,53 @@ impl RawRamFile {
     fn size(&self) -> usize {
         self.size
     }
+
+    fn map_view(
+        &self,
+        addr: VirtAddr,
+        offset: usize,
+        size: usize,
+        task: TaskPointer,
+        permission: FileViewPermission,
+    ) -> Result<(), SvsmError> {
+        // Offset must be page aligned
+        if (offset & (PAGE_SIZE - 1)) != 0 {
+            return Err(SvsmError::FileSystem(FsError::Inval));
+        }
+        let size = (size + PAGE_SIZE - 1) & !(PAGE_SIZE - 1);
+        let start_page = offset / PAGE_SIZE;
+        let end_page = start_page + (size / PAGE_SIZE);
+
+        let mut page_addr = addr;
+
+        let flags = match permission {
+            FileViewPermission::Read => PageTable::task_data_ro_flags(),
+            FileViewPermission::Write => PageTable::task_data_flags(),
+            FileViewPermission::Execute => PageTable::task_exec_flags(),
+        };
+
+        let task = task.task.borrow_mut();
+        let mut pt = task.page_table.lock();
+        for i in start_page..=end_page {
+            if i >= self.pages.len() {
+                break;
+            }
+            pt.map_4k(page_addr, self.pages[i].phys_addr(), flags)?;
+            page_addr = page_addr + PAGE_SIZE;
+        }
+        Ok(())
+    }
+
+    fn unmap_view(&self, addr: VirtAddr, size: usize, task: TaskPointer) -> Result<(), SvsmError> {
+        let size = (size + PAGE_SIZE - 1) & !(PAGE_SIZE - 1);
+        let task = task.task.borrow_mut();
+        let mut pt = task.page_table.lock();
+        for i in 0..(size / PAGE_SIZE) {
+            let page_addr = addr + (i * PAGE_SIZE);
+            pt.unmap_4k(page_addr);
+        }
+        Ok(())
+    }
 }
 
 #[derive(Debug)]
@@ -197,6 +247,23 @@ impl File for RamFile {
 
     fn size(&self) -> usize {
         self.rawfile.lock_read().size()
+    }
+
+    fn map_view(
+        &self,
+        addr: VirtAddr,
+        offset: usize,
+        size: usize,
+        task: TaskPointer,
+        permission: FileViewPermission,
+    ) -> Result<(), SvsmError> {
+        self.rawfile
+            .lock_read()
+            .map_view(addr, offset, size, task, permission)
+    }
+
+    fn unmap_view(&self, addr: VirtAddr, size: usize, task: TaskPointer) -> Result<(), SvsmError> {
+        self.rawfile.lock_read().unmap_view(addr, size, task)
     }
 }
 

@@ -7,8 +7,10 @@
 use super::ramfs::RamDirectory;
 use super::*;
 
+use crate::address::VirtAddr;
 use crate::error::SvsmError;
 use crate::locking::SpinLock;
+use crate::task::TaskPointer;
 
 use core::cmp::min;
 
@@ -57,6 +59,27 @@ impl RawFileHandle {
     fn size(&self) -> usize {
         self.file.size()
     }
+
+    pub fn map_view(
+        &mut self,
+        addr: VirtAddr,
+        offset: usize,
+        size: usize,
+        task: TaskPointer,
+        permission: FileViewPermission,
+    ) -> Result<VirtAddr, SvsmError> {
+        self.file.map_view(addr, offset, size, task, permission)?;
+        Ok(addr)
+    }
+
+    pub fn unmap_view(
+        &mut self,
+        addr: VirtAddr,
+        size: usize,
+        task: TaskPointer,
+    ) -> Result<(), SvsmError> {
+        self.file.unmap_view(addr, size, task)
+    }
 }
 
 #[derive(Debug)]
@@ -94,6 +117,28 @@ impl FileHandle {
 
     pub fn size(&self) -> usize {
         self.handle.lock().size()
+    }
+
+    pub fn map_view(
+        &self,
+        addr: VirtAddr,
+        offset: usize,
+        size: usize,
+        task: TaskPointer,
+        permission: FileViewPermission,
+    ) -> Result<VirtAddr, SvsmError> {
+        self.handle
+            .lock()
+            .map_view(addr, offset, size, task, permission)
+    }
+
+    pub fn unmap_view(
+        &self,
+        addr: VirtAddr,
+        size: usize,
+        task: TaskPointer,
+    ) -> Result<(), SvsmError> {
+        self.handle.lock().unmap_view(addr, size, task)
     }
 }
 
