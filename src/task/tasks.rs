@@ -21,10 +21,13 @@ use crate::error::SvsmError;
 use crate::locking::SpinLock;
 use crate::mm::alloc::{allocate_pages, get_order};
 use crate::mm::pagetable::{get_init_pgtable_locked, PageTable, PageTableRef};
+use crate::mm::virtualrange::VirtualRange;
 use crate::mm::{
-    virt_to_phys, PAGE_SIZE, PGTABLE_LVL3_IDX_PERCPU, SVSM_PERTASK_STACK_BASE,
-    SVSM_PERTASK_STACK_TOP,
+    virt_to_phys, PAGE_SIZE, PGTABLE_LVL3_IDX_PERCPU, SVSM_PERTASK_DYNAMIC_MEMORY_BASE,
+    SVSM_PERTASK_DYNAMIC_MEMORY_TOP, SVSM_PERTASK_STACK_BASE, SVSM_PERTASK_STACK_TOP,
 };
+use crate::types::PAGE_SHIFT;
+use crate::utils::bitmap_allocator::BitmapAllocator16K;
 use crate::utils::zero_mem_region;
 
 use super::schedule::{current_task_terminated, schedule};
@@ -32,6 +35,8 @@ use super::schedule::{current_task_terminated, schedule};
 pub const INITIAL_TASK_ID: u32 = 1;
 
 const STACK_SIZE: usize = 65536;
+
+type TaskVirtualRange = VirtualRange<BitmapAllocator16K>;
 
 #[derive(PartialEq, Debug, Copy, Clone)]
 pub enum TaskState {
@@ -45,6 +50,8 @@ pub enum TaskError {
     NotTerminated,
     // A closed task could not be removed from the task list
     CloseFailed,
+    // The task system has not been initialised
+    NotInitialised,
 }
 
 impl From<TaskError> for SvsmError {
@@ -196,6 +203,9 @@ pub struct Task {
 
     /// Amount of CPU resource the task has consumed
     pub runtime: TaskRuntimeImpl,
+
+    /// Per-task virtual memory allocations
+    pub virtual_map: Box<TaskVirtualRange>,
 }
 
 impl fmt::Debug for Task {
@@ -221,6 +231,20 @@ impl Task {
 
         let (task_stack, rsp) = Self::allocate_stack(entry, &mut pgtable)?;
 
+        // Initialise the virtual memory allocator range
+        let page_count =
+            (SVSM_PERTASK_DYNAMIC_MEMORY_TOP - SVSM_PERTASK_DYNAMIC_MEMORY_BASE) / PAGE_SIZE;
+        assert!(page_count <= TaskVirtualRange::CAPACITY);
+
+        // Allocate the virtual map on the heap as it can be too large for the
+        // initial stack
+        let mut virtual_map: Box<TaskVirtualRange> = Box::new(TaskVirtualRange::new());
+        virtual_map.init(
+            VirtAddr::from(SVSM_PERTASK_DYNAMIC_MEMORY_BASE),
+            page_count,
+            PAGE_SHIFT,
+        );
+
         let task: Box<Task> = Box::new(Task {
             rsp: u64::from(rsp),
             stack: task_stack,
@@ -230,6 +254,7 @@ impl Task {
             allocation: None,
             id: TASK_ID_ALLOCATOR.next_id(),
             runtime: TaskRuntimeImpl::default(),
+            virtual_map,
         });
         Ok(task)
     }
@@ -255,6 +280,23 @@ impl Task {
 
     pub fn set_affinity(&mut self, affinity: Option<u32>) {
         self.affinity = affinity;
+    }
+
+    pub fn virtual_alloc(
+        &mut self,
+        size_bytes: usize,
+        alignment: usize,
+    ) -> Result<VirtAddr, SvsmError> {
+        // Each bit in our bitmap represents a 4K page
+        if (size_bytes & (PAGE_SIZE - 1)) != 0 {
+            return Err(SvsmError::Mem);
+        }
+        let page_count = size_bytes >> PAGE_SHIFT;
+        self.virtual_map.alloc(page_count, alignment)
+    }
+
+    pub fn virtual_free(&mut self, vaddr: VirtAddr, size_bytes: usize) {
+        self.virtual_map.free(vaddr, size_bytes >> PAGE_SHIFT);
     }
 
     fn allocate_stack(

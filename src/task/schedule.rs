@@ -78,6 +78,10 @@ impl RunQueue {
         None
     }
 
+    pub fn current_task(&self) -> Option<TaskPointer> {
+        self.current_task.as_ref().cloned()
+    }
+
     pub fn current_task_id(&self) -> u32 {
         self.current_task
             .as_ref()
