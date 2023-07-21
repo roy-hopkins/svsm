@@ -6,19 +6,18 @@
 
 extern crate alloc;
 
-use core::cell::RefCell;
-
-use super::Task;
 use super::{tasks::TaskRuntime, TaskState, INITIAL_TASK_ID};
-use crate::address::{Address, VirtAddr};
+use super::{Task, TaskError};
+use crate::address::VirtAddr;
 use crate::cpu::percpu::{this_cpu, this_cpu_mut};
 use crate::elf;
 use crate::error::SvsmError;
+use crate::fs::{FileHandle, FileViewPermission};
 use crate::locking::SpinLock;
-use crate::mm::pagetable::PageTable;
-use crate::mm::virt_to_phys;
+use crate::mm::taskmem::{valloc, vfree};
 use alloc::boxed::Box;
 use alloc::rc::Rc;
+use core::cell::RefCell;
 use intrusive_collections::linked_list::Link;
 use intrusive_collections::{intrusive_adapter, Bound, KeyAdapter, LinkedList, RBTree, RBTreeLink};
 
@@ -269,10 +268,28 @@ pub fn create_task(
 }
 
 pub fn create_elf_task(
-    buf: &[u8],
+    file: &FileHandle,
     flags: u16,
     affinity: Option<u32>,
 ) -> Result<TaskPointer, SvsmError> {
+    // Map the file's physical memory into the creating task's virtual address space
+    let mapped_addr = valloc(file.size())?;
+    if file
+        .map_view(
+            mapped_addr,
+            0,
+            file.size(),
+            this_cpu().get_current_task(),
+            FileViewPermission::Read,
+        )
+        .is_err()
+    {
+        vfree(mapped_addr, file.size());
+        return Err(SvsmError::Task(TaskError::Alloc));
+    }
+
+    let buf = unsafe { core::slice::from_raw_parts_mut(mapped_addr.as_mut_ptr(), file.size()) };
+
     let elf = match elf::Elf64File::read(buf) {
         Ok(elf) => elf,
         Err(_) => return Err(SvsmError::Module),
@@ -283,33 +300,32 @@ pub fn create_elf_task(
     let mut task = Task::create(entry as usize, flags)?;
     task.set_affinity(affinity);
 
-    // Setup the pagetable for the virtual memory ranges described in the file
-    for segment in elf.image_load_segment_iter(default_base) {
-        let vaddr_start = VirtAddr::from(segment.vaddr_range.vaddr_begin);
-        let vaddr_end = VirtAddr::from(segment.vaddr_range.vaddr_end);
-        let aligned_vaddr_end = vaddr_end.page_align_up();
-        let flags = if segment.flags.contains(elf::Elf64PhdrFlags::EXECUTE) {
-            PageTable::exec_flags()
-        } else if segment.flags.contains(elf::Elf64PhdrFlags::WRITE) {
-            PageTable::data_flags()
-        } else {
-            PageTable::data_ro_flags()
-        };
-
-        let phys = virt_to_phys(VirtAddr::from(
-            (&buf[0] as *const u8) as u64 + segment.file_range.offset_begin as u64,
-        ));
-        task.page_table
-            .lock()
-            .map_region(vaddr_start, aligned_vaddr_end, phys, flags)
-            .expect("Failed to map kernel ELF segment");
-    }
-
     let node = Rc::new(TaskNode {
         tree_link: RBTreeLink::default(),
         list_link: Link::default(),
         task: RefCell::new(task),
     });
+
+    // Setup the pagetable for the virtual memory ranges described in the file
+    for segment in elf.image_load_segment_iter(default_base) {
+        let vaddr_start = VirtAddr::from(segment.vaddr_range.vaddr_begin);
+        let flags = if segment.flags.contains(elf::Elf64PhdrFlags::EXECUTE) {
+            FileViewPermission::Execute
+        } else if segment.flags.contains(elf::Elf64PhdrFlags::WRITE) {
+            FileViewPermission::Write
+        } else {
+            FileViewPermission::Read
+        };
+
+        let _res = file.map_view(
+            vaddr_start,
+            segment.file_range.offset_begin,
+            segment.file_range.offset_end - segment.file_range.offset_begin,
+            node.clone(),
+            flags,
+        );
+    }
+
     TASKLIST.lock().list().push_front(node.clone());
 
     // Allocate any unallocated tasks (including the newly created one)

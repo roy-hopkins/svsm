@@ -25,7 +25,7 @@ use crate::mm::{
 use crate::sev::ghcb::GHCB;
 use crate::sev::utils::RMPFlags;
 use crate::sev::vmsa::{allocate_new_vmsa, VMSASegment, VMSA};
-use crate::task::RunQueue;
+use crate::task::{RunQueue, TaskPointer};
 use crate::types::{PAGE_SHIFT, PAGE_SHIFT_2M, PAGE_SIZE, PAGE_SIZE_2M, SVSM_TR_FLAGS, SVSM_TSS};
 use crate::utils::bitmap_allocator::BitmapAllocator1024;
 use alloc::vec::Vec;
@@ -236,6 +236,14 @@ impl PerCpu {
 
     pub const fn get_apic_id(&self) -> u32 {
         self.apic_id
+    }
+
+    pub fn get_current_task(&self) -> TaskPointer {
+        let task_node = self
+            .runqueue
+            .current_task()
+            .expect("Attempt to get current task before initialisation");
+        task_node.clone()
     }
 
     fn allocate_page_table(&mut self) -> Result<(), SvsmError> {

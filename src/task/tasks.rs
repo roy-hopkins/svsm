@@ -46,12 +46,14 @@ pub enum TaskState {
 
 #[derive(Clone, Copy, Debug)]
 pub enum TaskError {
-    // Attempt to close a non-terminated task
+    /// Attempt to close a non-terminated task
     NotTerminated,
-    // A closed task could not be removed from the task list
+    /// A closed task could not be removed from the task list
     CloseFailed,
-    // The task system has not been initialised
+    /// The task system has not been initialised
     NotInitialised,
+    /// Memory allocation error,
+    Alloc,
 }
 
 impl From<TaskError> for SvsmError {
