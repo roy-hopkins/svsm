@@ -166,7 +166,8 @@ pub const PGTABLE_LVL3_IDX_PERTASK: usize = 508;
 pub const SVSM_PERTASK_BASE: usize = sign_extend(PGTABLE_LVL3_IDX_PERTASK << ((3 * 9) + 12));
 
 /// Virtual addresses for dynamic memory allocation
-pub const SVSM_PERTASK_DYNAMIC_MEMORY: usize = SVSM_PERTASK_BASE;
+pub const SVSM_PERTASK_DYNAMIC_MEMORY_BASE: usize = SVSM_PERTASK_BASE;
+pub const SVSM_PERTASK_DYNAMIC_MEMORY_TOP: usize = SVSM_PERTASK_BASE + (PAGE_SIZE * 16384);
 
 /// Task stack
 pub const SVSM_PERTASK_STACK_BASE: usize = SVSM_PERTASK_BASE + 0xffffff0000;
