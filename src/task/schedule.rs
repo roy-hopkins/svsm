@@ -247,11 +247,12 @@ impl TaskList {
 pub static TASKLIST: SpinLock<TaskList> = SpinLock::new(TaskList::new());
 
 pub fn create_task(
-    entry: extern "C" fn(),
+    entry: extern "C" fn(u64),
+    param: u64,
     flags: u16,
     affinity: Option<u32>,
 ) -> Result<TaskPointer, SvsmError> {
-    let mut task = Task::create(entry as usize, flags)?;
+    let mut task = Task::create(entry as usize, param, flags)?;
     task.set_affinity(affinity);
     let node = Rc::new(TaskNode {
         tree_link: RBTreeLink::default(),
@@ -297,7 +298,7 @@ pub fn create_elf_task(
     let default_base = elf.default_base();
     let entry = elf.get_entry(default_base);
 
-    let mut task = Task::create(entry as usize, flags)?;
+    let mut task = Task::create(entry as usize, 0, flags)?;
     task.set_affinity(affinity);
 
     let node = Rc::new(TaskNode {

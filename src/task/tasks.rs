@@ -38,6 +38,10 @@ const STACK_SIZE: usize = 65536;
 
 type TaskVirtualRange = VirtualRange<BitmapAllocator16K>;
 
+extern "C" {
+    static task_entry: u64;
+}
+
 #[derive(PartialEq, Debug, Copy, Clone)]
 pub enum TaskState {
     RUNNING,
@@ -224,14 +228,14 @@ impl fmt::Debug for Task {
 }
 
 impl Task {
-    pub fn create(entry: usize, flags: u16) -> Result<Box<Task>, SvsmError> {
+    pub fn create(entry: usize, param: u64, flags: u16) -> Result<Box<Task>, SvsmError> {
         let mut pgtable = if (flags & TASK_FLAG_SHARE_PT) != 0 {
             this_cpu().get_pgtable().clone_shared()?
         } else {
             Self::allocate_page_table()?
         };
 
-        let (task_stack, rsp) = Self::allocate_stack(entry, &mut pgtable)?;
+        let (task_stack, rsp) = Self::allocate_stack(entry, param, &mut pgtable)?;
 
         // Initialise the virtual memory allocator range
         let page_count =
@@ -303,6 +307,7 @@ impl Task {
 
     fn allocate_stack(
         entry: usize,
+        param: u64,
         pgtable: &mut PageTableRef,
     ) -> Result<(TaskStack, VirtAddr), SvsmError> {
         let stack_size = SVSM_PERTASK_STACK_TOP - SVSM_PERTASK_STACK_BASE;
@@ -334,15 +339,20 @@ impl Task {
         // 'Push' the task frame onto the stack
         unsafe {
             // flags
-            stack_ptr.offset(-3).write(read_flags());
+            stack_ptr.offset(-5).write(read_flags());
             // ret_addr
+            stack_ptr.offset(-4).write(&task_entry as *const u64 as u64);
+            // Parameter to entry point
+            stack_ptr.offset(-3).write(param);
+            // Entry point
             stack_ptr.offset(-2).write(entry as u64);
             // Task termination handler for when entry point returns
             stack_ptr.offset(-1).write(task_exit as *const () as u64);
         }
 
-        let initial_rsp =
-            VirtAddr::from(SVSM_PERTASK_STACK_TOP - (size_of::<TaskContext>() + size_of::<u64>()));
+        let initial_rsp = VirtAddr::from(
+            SVSM_PERTASK_STACK_TOP - (size_of::<TaskContext>() + (3 * size_of::<u64>())),
+        );
         Ok((task_stack, initial_rsp))
     }
 
@@ -374,6 +384,12 @@ extern "C" fn apply_new_context(new_task: *mut Task) -> u64 {
 global_asm!(
     r#"
         .text
+
+    .globl task_entry
+    task_entry:
+        pop     %rdi        // Parameter to entry point
+        // Next item on the stack is the entry point address
+        ret         
 
     switch_context:
         // Save the current context. The layout must match the TaskContext structure.
