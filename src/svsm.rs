@@ -402,6 +402,7 @@ pub extern "C" fn svsm_start(li: &KernelLaunchInfo, vb_addr: VirtAddr) {
     // Create the root task that runs the entry point then handles the request loop
     create_task(
         svsm_main,
+        0,
         TASK_FLAG_SHARE_PT,
         Some(this_cpu().get_apic_id()),
     )
@@ -411,7 +412,7 @@ pub extern "C" fn svsm_start(li: &KernelLaunchInfo, vb_addr: VirtAddr) {
 }
 
 #[no_mangle]
-pub extern "C" fn svsm_main() {
+pub extern "C" fn svsm_main(_param: u64) {
     // If required, the GDB stub can be started earlier, just after the console
     // is initialised in svsm_start() above.
     gdbstub_start().expect("Could not start GDB stub");
