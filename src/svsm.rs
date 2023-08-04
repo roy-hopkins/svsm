@@ -11,7 +11,6 @@ extern crate alloc;
 
 use alloc::vec::Vec;
 use svsm::fw_meta::{parse_fw_meta_data, print_fw_meta, validate_fw_memory, SevFWMetaData};
-use svsm::syscall::SyscallHandler;
 
 use core::arch::global_asm;
 use core::panic::PanicInfo;
@@ -48,7 +47,7 @@ use svsm::sev::sev_status_init;
 use svsm::sev::utils::{rmp_adjust, RMPFlags};
 use svsm::svsm_console::SVSMIOPort;
 use svsm::svsm_paging::{init_page_table, invalidate_stage2};
-use svsm::task::{create_task, TASK_FLAG_SHARE_PT};
+use svsm::task::{create_task, init_syscall, TASK_FLAG_SHARE_PT};
 use svsm::types::{GUEST_VMPL, PAGE_SIZE};
 use svsm::utils::{halt, immut_after_init::ImmutAfterInitCell, zero_mem_region};
 
@@ -431,7 +430,7 @@ pub extern "C" fn svsm_main(_param: u64) {
     populate_ram_fs(LAUNCH_INFO.kernel_fs_start, LAUNCH_INFO.kernel_fs_end)
         .expect("Failed to unpack FS archive");
 
-    SyscallHandler::init();
+    init_syscall();
 
     ModuleLoader::enumerate().expect("Failed to initialise loadable modules");
 
