@@ -5,10 +5,12 @@
 // Author: Roy Hopkins <rhopkins@suse.de>
 
 mod schedule;
+mod syscall;
 mod tasks;
 
 pub use schedule::{
     create_elf_task, create_task, is_current_task, schedule, RunQueue, TaskNode, TaskPointer,
     TASKLIST,
 };
+pub use syscall::init_syscall;
 pub use tasks::{Task, TaskContext, TaskError, TaskState, INITIAL_TASK_ID, TASK_FLAG_SHARE_PT};
