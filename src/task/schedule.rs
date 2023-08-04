@@ -313,7 +313,7 @@ pub fn create_elf_task(
     let default_base = elf.default_base();
     let entry = elf.get_entry(default_base);
 
-    let mut task = Task::create(entry as usize, 0, flags)?;
+    let mut task = Task::user_create(entry as usize, 0, flags)?;
     task.set_affinity(affinity);
 
     let node = Rc::new(TaskNode {
