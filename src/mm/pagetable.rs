@@ -254,6 +254,18 @@ impl PageTable {
         PTEntryFlags::PRESENT | PTEntryFlags::ACCESSED | PTEntryFlags::DIRTY
     }
 
+    pub fn user_data_flags() -> PTEntryFlags {
+        Self::task_data_flags() | PTEntryFlags::USER
+    }
+
+    pub fn user_data_ro_flags() -> PTEntryFlags {
+        Self::task_data_ro_flags() | PTEntryFlags::USER
+    }
+
+    pub fn user_exec_flags() -> PTEntryFlags {
+        Self::task_exec_flags() | PTEntryFlags::USER
+    }
+
     fn allocate_page_table() -> Result<*mut PTPage, SvsmError> {
         let ptr = allocate_zeroed_page()?;
         Ok(ptr.as_mut_ptr::<PTPage>())
