@@ -35,6 +35,7 @@ use super::schedule::{current_task_terminated, schedule};
 pub const INITIAL_TASK_ID: u32 = 1;
 
 const STACK_SIZE: usize = 65536;
+const USER_STACK_SIZE: usize = 65536;
 
 type TaskVirtualRange = VirtualRange<BitmapAllocator16K>;
 
@@ -71,6 +72,11 @@ pub struct TaskStack {
     pub virt_base: VirtAddr,
     pub virt_top: VirtAddr,
     pub phys: PhysAddr,
+}
+
+struct UserParams {
+    entry_point: usize,
+    param: u64,
 }
 
 pub const TASK_FLAG_SHARE_PT: u16 = 0x01;
@@ -279,6 +285,22 @@ impl Task {
         Ok(task)
     }
 
+    pub fn user_create(entry: usize, param: u64, flags: u16) -> Result<Box<Task>, SvsmError> {
+        // Launch via the user-mode entry point
+        let entry_param = Box::new(UserParams {
+            entry_point: entry,
+            param,
+        });
+
+        let mut task = Self::create(
+            launch_user_entry as usize,
+            Box::into_raw(entry_param) as u64,
+            flags,
+        )?;
+        task.init_user_mode(USER_STACK_SIZE)?;
+        Ok(task)
+    }
+
     pub fn set_current(&mut self, previous_task: *mut Task) {
         // This function is called by one task but returns in the context of
         // another task. The context of the current task is saved and execution
@@ -370,11 +392,95 @@ impl Task {
         Ok((task_stack, initial_rsp))
     }
 
+    fn init_user_mode(&mut self, stack_size: usize) -> Result<(), SvsmError> {
+        let num_pages = 1 << get_order(stack_size);
+        assert!(stack_size == num_pages * PAGE_SIZE);
+        let pages = allocate_pages(get_order(STACK_SIZE))?;
+        zero_mem_region(pages, pages + stack_size);
+
+        let stack_vaddr = self.virtual_alloc(stack_size, 0)?;
+
+        let user_stack = TaskStack {
+            virt_base: stack_vaddr,
+            virt_top: stack_vaddr + stack_size,
+            phys: virt_to_phys(pages),
+        };
+
+        // We current have a virtual address in SVSM shared memory for the stack. Configure
+        // the per-task pagetable to map the stack into the task memory map.
+        self.page_table.lock().map_region_4k(
+            user_stack.virt_base,
+            user_stack.virt_top,
+            user_stack.phys,
+            PageTable::user_data_flags(),
+        )?;
+
+        self.user = Some(UserTask {
+            user_rsp: user_stack.virt_top.bits() as u64,
+            kernel_rsp: 0,
+            stack: user_stack,
+        });
+        Ok(())
+    }
+
     fn allocate_page_table() -> Result<PageTableRef, SvsmError> {
         // Base the new task page table on the initial SVSM kernel page table.
         // When the pagetable is schedule to a CPU, the per CPU entry will also
         // be added to the pagetable.
         get_init_pgtable_locked().clone_shared()
+    }
+}
+
+extern "C" fn launch_user_entry(entry: u64) {
+    unsafe {
+        let params = *Box::from_raw(entry as *mut UserParams);
+        let task_node = this_cpu()
+            .runqueue
+            .current_task()
+            .expect("Task entry point called when not the current task.");
+        let (user_rsp, kernel_rsp) = {
+            let task = task_node.task.borrow_mut();
+            let user = task
+                .user
+                .as_ref()
+                .expect("User entry point called from kernel task");
+            let kernel_rsp = &user.kernel_rsp as *const u64;
+            (user.user_rsp, kernel_rsp)
+        };
+
+        asm!(
+            r#"
+                // user mode might change non-volatile registers
+                push    %rbx
+                push    %rbp
+                push    %r12
+                push    %r13
+                push    %r14
+                push    %r15
+
+                // Save the address after the sysretq so when the task
+                // exits it can jump there.
+                leaq    1f(%rip), %r8
+                pushq   %r8
+
+                movq    %rsp, (%rsi)
+                movq    %rax, %rsp
+                movq    $0x202, %r11
+                sysretq
+
+            1:
+                pop     %r15
+                pop     %r14
+                pop     %r13
+                pop     %r12
+                pop     %rbp
+                pop     %rbx
+            "#,
+            in("rcx") params.entry_point,
+            in("rdi") params.param,
+            in("rax") user_rsp,
+            in("rsi") kernel_rsp,
+            options(att_syntax));
     }
 }
 
