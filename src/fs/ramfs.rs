@@ -186,13 +186,24 @@ impl RawRamFile {
 
         let mut page_addr = addr;
 
-        let flags = match permission {
-            FileViewPermission::Read => PageTable::task_data_ro_flags(),
-            FileViewPermission::Write => PageTable::task_data_flags(),
-            FileViewPermission::Execute => PageTable::task_exec_flags(),
+        let task = task.task.borrow_mut();
+
+        // Select pagetable flags based on whether this is a kernel or user
+        // mode task.
+        let flags = if task.user.is_some() {
+            match permission {
+                FileViewPermission::Read => PageTable::user_data_ro_flags(),
+                FileViewPermission::Write => PageTable::user_data_flags(),
+                FileViewPermission::Execute => PageTable::user_exec_flags(),
+            }
+        } else {
+            match permission {
+                FileViewPermission::Read => PageTable::task_data_ro_flags(),
+                FileViewPermission::Write => PageTable::task_data_flags(),
+                FileViewPermission::Execute => PageTable::task_exec_flags(),
+            }
         };
 
-        let task = task.task.borrow_mut();
         let mut pt = task.page_table.lock();
         for i in start_page..=end_page {
             if i >= self.pages.len() {
