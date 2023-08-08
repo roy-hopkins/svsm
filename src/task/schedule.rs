@@ -3,6 +3,11 @@
 // Copyright (c) 2022-2023 SUSE LLC
 //
 // Author: Roy Hopkins <rhopkins@suse.de>
+//
+// Other contributors:
+//
+// Carlos Bilbao <carlos.bilbao@amd.com>
+//
 
 extern crate alloc;
 
@@ -157,21 +162,20 @@ impl RunQueue {
 
     /// Helper function that determines if a task is a candidate for allocating
     /// to a CPU
-    fn is_cpu_candidate(id: u32, t: &Task) -> bool {
-        (t.state == TaskState::RUNNING)
-            && t.allocation.is_none()
-            && t.affinity.map_or(true, |a| a == id)
+    fn is_cpu_candidate(id: u32, candidate_task: &Task) -> bool {
+        (candidate_task.state == TaskState::RUNNING)
+            && candidate_task.allocation.is_none()
+            && candidate_task.affinity.map_or(true, |a| a == id)
     }
 
     /// Iterate through all unallocated tasks and find a suitable candidates
     /// for allocating to this queue
-    pub fn allocate(&mut self, id: u32, tl: &mut LinkedList<TaskListAdapter>) {
-        let lowest_runtime = if let Some(t) = self.tree().lower_bound(Bound::Included(&0)).get() {
-            t.task.borrow().runtime.value()
-        } else {
-            0
+    pub fn allocate(&mut self, id: u32, task_list: &mut LinkedList<TaskListAdapter>) {
+        let lowest_runtime = match self.tree().lower_bound(Bound::Included(&0)).get() {
+            Some(t) => t.task.borrow().runtime.value(),
+            None => 0,
         };
-        let mut cursor = tl.cursor_mut();
+        let mut cursor = task_list.cursor_mut();
         while !cursor.peek_next().is_null() {
             cursor.move_next();
             // Filter on running, unallocated tasks that either have no affinity
@@ -262,13 +266,13 @@ pub fn create_task(
     {
         // Ensure the tasklist lock is released before schedule() is called
         // otherwise the lock will be held when switching to a new context
-        let mut tl = TASKLIST.lock();
-        tl.list().push_front(node.clone());
+        let mut task_list = TASKLIST.lock();
+        task_list.list().push_front(node.clone());
         // Allocate any unallocated tasks (including the newly created one)
         // to the current CPU
         this_cpu_mut()
             .runqueue
-            .allocate(this_cpu().get_apic_id(), tl.list());
+            .allocate(this_cpu().get_apic_id(), task_list.list());
     }
     schedule();
 
@@ -277,10 +281,13 @@ pub fn create_task(
 
 /// Check to see if the task scheduled on the current processor has the given id
 pub fn is_current_task(id: u32) -> bool {
-    match &this_cpu().runqueue.current_task {
-        Some(current_task) => current_task.task.borrow().id == id,
-        None => id == INITIAL_TASK_ID,
-    }
+    this_cpu()
+        .runqueue
+        .current_task
+        .as_ref()
+        .map_or(id == INITIAL_TASK_ID, |current_task| {
+            current_task.task.borrow().id == id
+        })
 }
 
 pub unsafe fn current_task_terminated() {
@@ -301,4 +308,93 @@ pub fn schedule() {
     // We're now in the context of the new task. If the previous task had terminated
     // then we can release it's reference here.
     let _ = this_cpu_mut().runqueue.terminated_task.take();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // Dummy task structure for testing
+    struct TestTask {
+        id: u32,
+        runtime: u64,
+        state: TaskState,
+        allocation: Option<u32>,
+        affinity: Option<u32>,
+    }
+ 
+    impl TestTask {
+        fn new(id: u32, runtime: u64, state: TaskState, allocation: Option<u32>, affinity: Option<u32>) -> Self {
+            TestTask {
+                id,
+                runtime,
+                state,
+                allocation,
+                affinity,
+            }
+        }
+
+        fn as_ref(&self) -> &TestTask {
+            self
+        }
+    }
+
+    struct TestTaskNode {
+        task: RefCell<Box<TestTask>>,
+    }
+
+    #[test]
+    fn test_get_task() {
+        // Create a new RunQueue for testing
+        let mut run_queue = RunQueue::new();
+        
+        // Create two TestTask instances with different IDs
+        let task1 = Rc::new(TestTaskNode {
+            task: RefCell::new(Box::new(TestTask::new(1, 10, TaskState::RUNNING, None, None))),
+        });
+        let task2 = Rc::new(TestTaskNode {
+            task: RefCell::new(Box::new(TestTask::new(2, 20, TaskState::RUNNING, None, None))),
+        });
+        
+        // Insert the TestTask instances into the RunQueue
+        run_queue.tree().insert(task1.clone());
+        run_queue.tree().insert(task2.clone());
+        
+        // Test getting tasks by their IDs
+        assert_eq!(run_queue.get_task(1), Some(task1.clone()));
+        assert_eq!(run_queue.get_task(2), Some(task2.clone()));
+        assert_eq!(run_queue.get_task(3), None);
+    }
+
+    #[test]
+    fn test_schedule() {
+        // Create a new RunQueue for testing
+        let mut run_queue = RunQueue::new();
+
+        // Create a TestTask instance and insert it into the RunQueue
+        let task = Rc::new(TestTaskNode {
+            task: RefCell::new(Box::new(TestTask::new(
+                1,
+                10,
+                TaskState::RUNNING,
+                None,
+                None,
+            ))),
+        });
+        run_queue.tree().insert(task.clone());
+
+        // Simulate a scheduling operation
+        let (next_task_ptr, current_task_ptr) = run_queue.schedule();
+
+        // Check if the next task pointer is Some and current task pointer is None
+        assert!(next_task_ptr.is_some());
+        assert!(current_task_ptr.is_null());
+
+        // Simulate another scheduling operation
+        let (next_task_ptr, current_task_ptr) = run_queue.schedule();
+
+        // Check if the next task pointer is Some and current task pointer is Some
+        assert!(next_task_ptr.is_some());
+        assert!(!current_task_ptr.is_null());
+    }
 }
