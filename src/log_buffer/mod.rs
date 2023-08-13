@@ -108,3 +108,7 @@ impl LogBuffer {
 }
 
 pub static mut LB: SpinLock<LogBuffer> = SpinLock::new(LogBuffer::new());
+
+pub fn migrate_log_buffer(log_buf: &LogBuffer) {
+    unsafe { LB.lock().migrate(log_buf) };
+}

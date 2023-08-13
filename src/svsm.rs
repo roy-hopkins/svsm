@@ -18,12 +18,13 @@ use core::slice;
 use cpuarch::snp_cpuid::SnpCpuidTable;
 use svsm::address::{PhysAddr, VirtAddr};
 use svsm::config::SvsmConfig;
-use svsm::console::{init_console, install_console_logger, WRITER};
+use svsm::console::{init_console, WRITER};
 use svsm::cpu::control_regs::{cr0_init, cr4_init};
 use svsm::cpu::cpuid::{dump_cpuid_table, register_cpuid_table};
 use svsm::cpu::efer::efer_init;
 use svsm::cpu::gdt::load_gdt;
 use svsm::cpu::idt::svsm::{early_idt_init, idt_init};
+use svsm::cpu::line_buffer::install_buffer_logger;
 use svsm::cpu::percpu::PerCpu;
 use svsm::cpu::percpu::{this_cpu, this_cpu_mut};
 use svsm::cpu::smp::start_secondary_cpus;
@@ -36,6 +37,8 @@ use svsm::fw_cfg::FwCfg;
 use svsm::greq::driver::guest_request_driver_init;
 use svsm::igvm_params::IgvmParams;
 use svsm::kernel_region::new_kernel_region;
+use svsm::log_buffer::migrate_log_buffer;
+use svsm::migrate::MigrateInfo;
 use svsm::mm::alloc::{memory_info, print_memory_info, root_mem_init};
 use svsm::mm::memory::init_memory_map;
 use svsm::mm::pagetable::paging_init;
@@ -68,7 +71,7 @@ extern "C" {
  * startup_64.
  *
  * %r8  Pointer to the KernelLaunchInfo structure
- * %r9  Pointer to the valid-bitmap from stage2
+ * %r9  Pointer to the MigrateInfo from stage2
  */
 global_asm!(
     r#"
@@ -320,9 +323,9 @@ fn map_and_parse_fw_meta(fw_metadata_phys: PhysAddr) -> Result<SevFWMetaData, Sv
 }
 
 #[no_mangle]
-pub extern "C" fn svsm_start(li: &KernelLaunchInfo, vb_addr: usize) {
+pub extern "C" fn svsm_start(li: &KernelLaunchInfo, mi: &MigrateInfo) {
     let launch_info: KernelLaunchInfo = *li;
-    let vb_ptr = VirtAddr::new(vb_addr).as_mut_ptr::<u64>();
+    let vb_ptr = mi.bitmap_addr.as_mut_ptr::<u64>();
 
     mapping_info_init(&launch_info);
 
@@ -361,6 +364,7 @@ pub extern "C" fn svsm_start(li: &KernelLaunchInfo, vb_addr: usize) {
 
     memory_init(&launch_info);
     migrate_valid_bitmap().expect("Failed to migrate valid-bitmap");
+    migrate_log_buffer(&mi.log_buf.lock());
 
     let kernel_elf_len = (launch_info.kernel_elf_stage2_virt_end
         - launch_info.kernel_elf_stage2_virt_start) as usize;
@@ -390,16 +394,10 @@ pub extern "C" fn svsm_start(li: &KernelLaunchInfo, vb_addr: usize) {
     }
     idt_init();
 
-    CONSOLE_SERIAL
-        .init(&SerialPort {
-            driver: &CONSOLE_IO,
-            port: debug_serial_port,
-        })
-        .expect("console serial output already configured");
-
     WRITER.lock().set(&*CONSOLE_SERIAL);
+
     init_console();
-    install_console_logger("SVSM");
+    install_buffer_logger("SVSM");
 
     log::info!("COCONUT Secure Virtual Machine Service Module (SVSM)");
 
