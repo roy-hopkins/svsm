@@ -3,7 +3,11 @@
 // Copyright (c) 2022-2023 SUSE LLC
 //
 // Author: Roy Hopkins <rhopkins@suse.de>
-
+//
+// Other contributors:
+//
+// Carlos Bilbao <carlos.bilbao@amd.com>
+//
 extern crate alloc;
 
 use core::cell::RefCell;
@@ -301,4 +305,84 @@ pub fn schedule() {
     // We're now in the context of the new task. If the previous task had terminated
     // then we can release it's reference here.
     let _ = this_cpu_mut().runqueue.terminated_task.take();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::address::*;
+    use crate::mm::pagetable::*;
+    use crate::task::schedule::tests::alloc::vec;
+    use crate::task::schedule::tests::vec::Vec;
+    use crate::task::tasks::*;
+    use core::ptr;
+
+    #[allow(deref_nullptr)]
+    #[test]
+    fn test_rq_schedule() {
+        let mut runqueue = RunQueue::new();
+
+        // Simulate creating and adding tasks to runqueue
+        let task1 = Rc::new(TaskNode {
+            tree_link: RBTreeLink::default(),
+            list_link: Link::default(),
+            task: RefCell::new(Box::new(Task {
+                rsp: 0,
+                stack: TaskStack {
+                    virt_base: VirtAddr::new(0),
+                    virt_top: VirtAddr::new(0),
+                    phys: PhysAddr::new(0),
+                },
+                page_table: unsafe {
+                    SpinLock::new(PageTableRef::new(&mut *ptr::null_mut() as &mut PageTable))
+                },
+                state: TaskState::RUNNING,
+                affinity: Some(0),
+                allocation: Some(0),
+                id: 1,
+                runtime: CountRuntime::default(),
+            })),
+        });
+
+        let task2 = Rc::new(TaskNode {
+            tree_link: RBTreeLink::default(),
+            list_link: Link::default(),
+            task: RefCell::new(Box::new(Task {
+                rsp: 0,
+                stack: TaskStack {
+                    virt_base: VirtAddr::new(0),
+                    virt_top: VirtAddr::new(0),
+                    phys: PhysAddr::new(0),
+                },
+                page_table: unsafe {
+                    SpinLock::new(PageTableRef::new(&mut *ptr::null_mut() as &mut PageTable))
+                },
+                state: TaskState::RUNNING,
+                affinity: Some(0),
+                allocation: Some(0),
+                id: 2,
+                runtime: CountRuntime::default(),
+            })),
+        });
+
+        runqueue.tree().insert(task1.clone());
+        runqueue.tree().insert(task2.clone());
+
+        // Simulate scheduling the next task
+        let (next_task, _current_task) = runqueue.schedule();
+
+        // Is the next task correctly scheduled?
+        assert_eq!(next_task.unwrap(), task1.task.as_ptr());
+
+        // Check the task IDs in the tree after scheduling
+        let task_ids_after = runqueue
+            .tree()
+            .iter()
+            .map(|task| task.task.borrow().id)
+            .collect::<Vec<_>>();
+        assert_eq!(task_ids_after, vec![1, 2]);
+
+        let cursor = runqueue.tree().front();
+        assert_eq!(cursor.get().unwrap().task.borrow().id, 1);
+    }
 }
