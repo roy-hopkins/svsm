@@ -38,4 +38,6 @@ pub enum SvsmError {
     Task(TaskError),
     // Errors related to modules
     Module,
+    // Errors related to invalid system call request
+    InvalidSystemCall,
 }
