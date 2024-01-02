@@ -5,109 +5,49 @@
 // Author: Vasant Karasulli <vkarasulli@suse.de>
 
 extern crate alloc;
-use crate::locking::SpinLock;
+
+use core::fmt::Debug;
+
+use crate::locking::{LockGuard, SpinLock};
 use crate::string::FixedString;
 
 #[cfg(not(test))]
 use crate::types::{LINE_BUFFER_SIZE, PAGE_SIZE};
+use crate::utils::StringRingBuffer;
 
+use alloc::string::ToString;
+use alloc::vec;
 use alloc::vec::Vec;
 
 #[cfg(not(test))]
 const BUF_SIZE: usize = PAGE_SIZE;
 
-#[derive(Clone, Copy, Debug)]
-struct LogBufferState {
-    tail: usize,
-    head: usize,
-    full: bool,
-}
-
-impl LogBufferState {
-    pub const fn new(tail: usize, head: usize, full: bool) -> Self {
-        LogBufferState { tail, head, full }
-    }
-
-    pub fn update_for_write(&mut self, len: usize) -> usize {
-        let current_head = self.head;
-        self.head = (current_head + len) % BUF_SIZE;
-
-        let place_left = if current_head >= self.tail {
-            BUF_SIZE - current_head + self.tail
-        } else {
-            self.tail - current_head
-        };
-
-        if place_left <= len {
-            self.full = true;
-        }
-
-        /* update the tail offset if this write results
-         *  in a full buffer.
-         */
-        if self.full {
-            self.tail = self.head;
-        }
-
-        current_head
-    }
-
-    pub fn update_for_read(&mut self) {
-        self.tail = self.head;
-        self.full = false;
-    }
-}
-
 #[derive(Copy, Clone, Debug)]
 pub struct LogBuffer {
-    buf: [u8; BUF_SIZE],
-    state: LogBufferState,
+    buf: StringRingBuffer<BUF_SIZE>,
 }
 
 impl LogBuffer {
     const fn new() -> Self {
         Self {
-            buf: [0; BUF_SIZE],
-            state: LogBufferState::new(0, 0, false),
+            buf: StringRingBuffer::<BUF_SIZE>::new(),
         }
     }
 
     pub fn migrate(&mut self, log_buf_src: &Self) {
-        self.state = log_buf_src.state;
         self.buf = log_buf_src.buf;
     }
 
     pub fn write_log(&mut self, s: &FixedString<LINE_BUFFER_SIZE>) {
-        let len = s.length();
-        let mut head = self.state.update_for_write(len);
-
-        let mut tmp: [u8; 4] = [0; 4];
-        for ch in s.iter() {
-            let utf = ch.encode_utf8(&mut tmp);
-            for item in utf.as_bytes().iter() {
-                self.buf[head] = *item;
-                head = (head + 1) % BUF_SIZE;
-            }
-        }
+        self.buf.write(&s.to_string());
     }
 
     pub fn read_log(&mut self) -> Vec<u8> {
-        let mut ret: Vec<u8>;
-        let st = self.state;
-
-        if st.head == st.tail && !st.full {
-            /* Buffer is empty */
-            ret = Vec::new();
-        } else if st.head > st.tail && !st.full {
-            ret = self.buf[st.tail..st.head].to_vec();
+        if let Some(str) = self.buf.read() {
+            str.as_bytes().to_vec()
         } else {
-            ret = self.buf[st.tail..].to_vec();
-            ret.extend_from_slice(&self.buf[..st.head]);
+            vec![]
         }
-
-        self.state.update_for_read();
-
-        ret
     }
 }
 
