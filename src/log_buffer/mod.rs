@@ -51,10 +51,20 @@ impl LogBuffer {
     }
 }
 
-pub static mut LB: SpinLock<LogBuffer> = SpinLock::new(LogBuffer::new());
+static mut LB: SpinLock<LogBuffer> = SpinLock::new(LogBuffer::new());
+
+pub fn log_buffer() -> LockGuard<'static, LogBuffer> {
+    // SAFETY: Mutation of the mutable LB global variable is via the
+    // `[SpinLock::lock()]` function. SpinLock is Sync meaning the mutation
+    // is safe even if this function is called simulataneously in
+    // different threads. Also, the mutation of the global variable
+    // by the returned `[LockGuard]` is safe for the same reason, meaning
+    // this function does not need to be marked unsafe.
+    unsafe { LB.lock() }
+}
 
 pub fn migrate_log_buffer(log_buf: &LogBuffer) {
-    unsafe { LB.lock().migrate(log_buf) };
+    log_buffer().migrate(log_buf);
 }
 
 #[cfg(test)]
@@ -70,9 +80,9 @@ fn test_read_write_normal() {
         fs.push(char::from_u32(i as u32).unwrap());
     }
 
-    unsafe { LB.lock().write_log(&fs) };
+    log_buffer().write_log(&fs);
 
-    let v = unsafe { LB.lock().read_log() };
+    let v = log_buffer().read_log();
     assert_eq!(v.len(), LINE_BUFFER_SIZE);
     for i in 1..=v.len() {
         assert_eq!(i as u8, v[i - 1]);
@@ -86,9 +96,9 @@ fn test_read_write_interleaved() {
         fs.push(char::from_u32(i as u32).unwrap());
     }
 
-    unsafe { LB.lock().write_log(&fs) };
+    log_buffer().write_log(&fs);
 
-    let v = unsafe { LB.lock().read_log() };
+    let v = log_buffer().read_log();
     assert_eq!(v.len(), LINE_BUFFER_SIZE / 2);
     for i in 1..=v.len() {
         assert_eq!(i as u8, v[i - 1]);
@@ -99,9 +109,9 @@ fn test_read_write_interleaved() {
         fs.push(char::from_u32((i + 1) as u32).unwrap());
     }
 
-    unsafe { LB.lock().write_log(&fs) };
+    log_buffer().write_log(&fs);
 
-    let v = unsafe { LB.lock().read_log() };
+    let v = log_buffer().read_log();
     assert_eq!(v.len(), LINE_BUFFER_SIZE / 2);
     for i in 1..v.len() {
         let val = (i + LINE_BUFFER_SIZE / 2) as u8;
@@ -116,9 +126,9 @@ fn test_write_wrap_around() {
         fs.push(char::from_u32(i as u32).unwrap());
     }
 
-    unsafe { LB.lock().write_log(&fs) };
+    log_buffer().write_log(&fs);
 
-    let v = unsafe { LB.lock().read_log() };
+    let v = log_buffer().read_log();
     assert_eq!(v.len(), LINE_BUFFER_SIZE / 2);
     for i in 1..=v.len() {
         assert_eq!(i as u8, v[i - 1]);
@@ -130,9 +140,9 @@ fn test_write_wrap_around() {
         fs.push(char::from_u32(val).unwrap());
     }
 
-    unsafe { LB.lock().write_log(&fs) };
+    log_buffer().write_log(&fs);
 
-    let v = unsafe { LB.lock().read_log() };
+    let v = log_buffer().read_log();
     assert_eq!(v.len(), LINE_BUFFER_SIZE);
     for i in 1..v.len() {
         let val = (i + LINE_BUFFER_SIZE / 2) as u8;
@@ -142,6 +152,6 @@ fn test_write_wrap_around() {
 
 #[test]
 fn test_read_empty_buffer() {
-    let v = unsafe { LB.lock().read_log() };
+    let v = log_buffer().read_log();
     assert_eq!(v.len(), 0);
 }

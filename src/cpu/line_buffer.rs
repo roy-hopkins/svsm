@@ -7,7 +7,7 @@
 use crate::console::_print;
 
 use crate::cpu::percpu::this_cpu_mut;
-use crate::log_buffer::LB;
+use crate::log_buffer::log_buffer;
 use crate::string::FixedString;
 use crate::types::LINE_BUFFER_SIZE;
 use crate::utils::immut_after_init::ImmutAfterInitCell;
@@ -31,7 +31,7 @@ impl LineBuffer {
             self.buf.push(c);
             if c == '\n' || self.buf.length() == LINE_BUFFER_SIZE {
                 // when buffer is full or '\n' character is encountered
-                unsafe { LB.lock().write_log(&self.buf) };
+                log_buffer().write_log(&self.buf);
                 self.buf.clear();
             }
         }
