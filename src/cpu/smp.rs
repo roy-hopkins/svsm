@@ -75,8 +75,8 @@ fn start_ap() {
 }
 
 #[no_mangle]
-pub extern "C" fn ap_request_loop() {
-    create_kernel_task(request_processing_main, TASK_FLAG_SHARE_PT)
+pub extern "C" fn ap_request_loop(_param: u64) {
+    create_kernel_task(request_processing_main, 0, TASK_FLAG_SHARE_PT)
         .expect("Failed to launch request processing task");
     request_loop();
     panic!("Returned from request_loop!");

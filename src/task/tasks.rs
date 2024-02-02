@@ -7,6 +7,7 @@
 extern crate alloc;
 
 use alloc::sync::Arc;
+use core::arch::global_asm;
 use core::fmt;
 use core::mem::size_of;
 use core::sync::atomic::{AtomicU32, Ordering};
@@ -25,6 +26,9 @@ use intrusive_collections::{intrusive_adapter, LinkedListAtomicLink};
 
 use super::schedule::{current_task_terminated, schedule};
 
+extern "C" {
+    static task_entry: u64;
+}
 pub const INITIAL_TASK_ID: u32 = 1;
 
 #[derive(PartialEq, Debug, Copy, Clone, Default)]
@@ -241,7 +245,8 @@ impl fmt::Debug for Task {
 impl Task {
     pub fn create(
         cpu: &mut PerCpu,
-        entry: extern "C" fn(),
+        entry: extern "C" fn(u64),
+        param: u64,
         flags: u16,
     ) -> Result<TaskPointer, SvsmError> {
         let mut pgtable = if (flags & TASK_FLAG_SHARE_PT) != 0 {
@@ -256,7 +261,7 @@ impl Task {
             VMR::new(SVSM_PERTASK_BASE, SVSM_PERTASK_END, PTEntryFlags::empty());
         vm_kernel_range.initialize()?;
 
-        let (stack, raw_bounds, rsp_offset) = Self::allocate_stack(cpu, entry)?;
+        let (stack, raw_bounds, rsp_offset) = Self::allocate_stack(cpu, entry, param)?;
         vm_kernel_range.insert_at(SVSM_PERTASK_STACK_BASE, stack)?;
 
         vm_kernel_range.populate(&mut pgtable);
@@ -343,7 +348,8 @@ impl Task {
 
     fn allocate_stack(
         cpu: &mut PerCpu,
-        entry: extern "C" fn(),
+        entry: extern "C" fn(u64),
+        param: u64,
     ) -> Result<(Arc<Mapping>, MemoryRegion<VirtAddr>, usize), SvsmError> {
         let stack = VMKernelStack::new()?;
         let bounds = stack.bounds(VirtAddr::from(0u64));
@@ -358,14 +364,22 @@ impl Task {
         // 'Push' the task frame onto the stack
         unsafe {
             // flags
-            stack_ptr.offset(-3).write(read_flags());
+            stack_ptr.offset(-5).write(read_flags());
+            // Task entry point
+            stack_ptr.offset(-4).write(&task_entry as *const u64 as u64);
+            // Parameter to entry point
+            stack_ptr.offset(-3).write(param);
             // ret_addr
             stack_ptr.offset(-2).write(entry as *const () as u64);
             // Task termination handler for when entry point returns
             stack_ptr.offset(-1).write(task_exit as *const () as u64);
         }
 
-        Ok((mapping, bounds, size_of::<TaskContext>() + size_of::<u64>()))
+        Ok((
+            mapping,
+            bounds,
+            size_of::<TaskContext>() + 3 * size_of::<u64>(),
+        ))
     }
 
     fn allocate_page_table() -> Result<PageTableRef, SvsmError> {
@@ -382,3 +396,16 @@ extern "C" fn task_exit() {
     }
     schedule();
 }
+
+global_asm!(
+    r#"
+        .text
+    .globl task_entry
+    task_entry:
+        pop     %rdi        // Parameter to entry point
+        
+        // Next item on the stack is the entry point address
+        ret
+    "#,
+    options(att_syntax)
+);

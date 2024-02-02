@@ -378,7 +378,7 @@ pub extern "C" fn svsm_start(li: &KernelLaunchInfo, vb_addr: usize) {
 }
 
 #[no_mangle]
-pub extern "C" fn svsm_main() {
+pub extern "C" fn svsm_main(_param: u64) {
     // If required, the GDB stub can be started earlier, just after the console
     // is initialised in svsm_start() above.
     gdbstub_start().expect("Could not start GDB stub");
@@ -450,7 +450,7 @@ pub extern "C" fn svsm_main() {
         }
     }
 
-    create_kernel_task(request_processing_main, TASK_FLAG_SHARE_PT)
+    create_kernel_task(request_processing_main, 0, TASK_FLAG_SHARE_PT)
         .expect("Failed to launch request processing task");
 
     #[cfg(test)]

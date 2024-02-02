@@ -151,7 +151,7 @@ pub fn request_loop() {
 }
 
 #[no_mangle]
-pub extern "C" fn request_processing_main() {
+pub extern "C" fn request_processing_main(_param: u64) {
     let apic_id = this_cpu().get_apic_id();
 
     log::info!("Launching request-processing task on CPU {}", apic_id);

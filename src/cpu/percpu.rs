@@ -463,8 +463,8 @@ impl PerCpu {
         self.register_ghcb()
     }
 
-    pub fn setup_idle_task(&mut self, entry: extern "C" fn()) -> Result<(), SvsmError> {
-        let idle_task = Task::create(self, entry, TASK_FLAG_SHARE_PT)?;
+    pub fn setup_idle_task(&mut self, entry: extern "C" fn(u64)) -> Result<(), SvsmError> {
+        let idle_task = Task::create(self, entry, 0, TASK_FLAG_SHARE_PT)?;
         self.runqueue.lock_read().set_idle_task(idle_task);
         Ok(())
     }
