@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["SVM_EXIT_CPUID","SVM_EXIT_EXCP_BASE","SVM_EXIT_IOIO","SVM_EXIT_LAST_EXCP","X86_TRAP","X86_TRAP_DB"],"enum":["VcErrorType"],"fn":["handle_cpuid","handle_ioio","handle_vc_exception","snp_cpuid","stage2_handle_vc_exception","stage2_handle_vc_exception_no_ghcb","vc_decode_insn","vc_decoding_needed","vc_finish_insn"],"struct":["VcError"]};
