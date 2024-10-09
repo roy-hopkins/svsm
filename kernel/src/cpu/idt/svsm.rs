@@ -265,9 +265,13 @@ pub extern "C" fn ex_handler_panic(ctx: &mut X86ExceptionContext, vector: usize)
 }
 
 #[no_mangle]
-pub extern "C" fn common_isr_handler(_vector: usize) {
+pub extern "C" fn common_isr_handler(vector: usize) {
     // Interrupt injection requests currently require no processing; they occur
     // simply to ensure an exit from the guest.
+
+    if vector == 32 {
+        log::info!("** tick **");
+    }
 
     // Treat any unhandled interrupt as a spurious interrupt.
     SVSM_PLATFORM.as_dyn_ref().eoi();
