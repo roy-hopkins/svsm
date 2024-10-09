@@ -76,7 +76,7 @@ pub struct SnpPlatform {
 impl SnpPlatform {
     pub fn new() -> Self {
         Self {
-            can_use_interrupts: false,
+            can_use_interrupts: true,
         }
     }
 }

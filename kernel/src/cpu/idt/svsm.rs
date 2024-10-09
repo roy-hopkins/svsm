@@ -16,7 +16,7 @@ use super::common::{
     TS_VECTOR, UD_VECTOR, VC_VECTOR, XF_VECTOR,
 };
 use crate::address::VirtAddr;
-use crate::cpu::X86ExceptionContext;
+use crate::cpu::{HostApic, X86ExceptionContext};
 use crate::debug::gdbstub::svsm_gdbstub::handle_debug_exception;
 use crate::platform::SVSM_PLATFORM;
 use crate::task::{is_task_fault, terminate};
@@ -51,6 +51,7 @@ extern "C" {
     fn asm_entry_hv();
     fn asm_entry_vc();
     fn asm_entry_sx();
+    fn asm_entry_irq20();
     fn asm_entry_int80();
     fn asm_entry_irq_int_inj();
 
@@ -85,6 +86,7 @@ pub fn early_idt_init() {
     idt.set_entry(HV_VECTOR, IdtEntry::entry(asm_entry_hv));
     idt.set_entry(VC_VECTOR, IdtEntry::entry(asm_entry_vc));
     idt.set_entry(SX_VECTOR, IdtEntry::entry(asm_entry_sx));
+    idt.set_entry(0x20, IdtEntry::entry(asm_entry_irq20));
     idt.set_entry(INT_INJ_VECTOR, IdtEntry::entry(asm_entry_irq_int_inj));
 
     // Interupts
@@ -269,6 +271,15 @@ pub extern "C" fn common_isr_handler(_vector: usize) {
 
     // Treat any unhandled interrupt as a spurious interrupt.
     SVSM_PLATFORM.as_dyn_ref().eoi();
+}
+
+#[no_mangle]
+pub extern "C" fn ex_handler_irq(_ctx: &mut X86ExceptionContext, vector: usize) {
+    if vector == 32 {
+        // Timer interrupt
+        log::info!("** tick **");
+        HostApic::eoi().expect("Failed to issue EOI");
+    }
 }
 
 global_asm!(include_str!("entry.S"), options(att_syntax));

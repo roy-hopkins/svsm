@@ -40,8 +40,21 @@ asm_entry_\name:
 	push_regs
 	movl	$\vector, %esi
 	movq	%rsp, %rdi
+
+	// The handler can modify the GHCB MSR. Save and restore it.
+	movl 	$0xC0010130, %ecx
+	rdmsr
+	push	%rax
+	push	%rdx
+
 	xorl	%edx, %edx
 	call	ex_handler_\handler
+
+	pop		%rdx
+	pop		%rax
+	movl 	$0xC0010130, %ecx
+	wrmsr
+
 	jmp	default_return
 .endm
 
@@ -357,6 +370,9 @@ default_entry_no_ist	name=vc		handler=vmm_communication	error_code=1	vector=29
 
 // #SX Security Exception (Vector 30)
 default_entry_no_ist	name=sx		handler=panic			error_code=1	vector=30
+
+// APIC timer
+default_entry_no_ist	name=irq20	handler=irq				error_code=0	vector=32
 
 // INT 0x80 system call handler
 default_entry_no_ist	name=int80	handler=system_call		error_code=0	vector=0x80
