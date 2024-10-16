@@ -212,7 +212,18 @@ handle_as_hv:
 	testq	%rdi, %rdi
 	jz	default_return
 handle_as_hv_with_doorbell:
+	// HV processing can modify the GHCB MSR. Save and restore it around
+	// the call to process_hv_events.
+	movl 	$0xC0010130, %ecx
+	rdmsr
+	push	%rax
+	push	%rdx
 	call 	process_hv_events
+	pop		%rdx
+	pop		%rax
+	movl 	$0xC0010130, %ecx
+	wrmsr
+
 	// fall through to default_return
 
 .globl default_return
