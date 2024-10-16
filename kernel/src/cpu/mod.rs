@@ -11,6 +11,7 @@ pub mod efer;
 pub mod extable;
 pub mod features;
 pub mod gdt;
+pub mod host_apic;
 pub mod idt;
 pub mod irq_state;
 pub mod mem;
@@ -25,6 +26,7 @@ pub mod vmsa;
 
 pub use apic::LocalApic;
 pub use gdt::{gdt, gdt_mut};
+pub use host_apic::HostApic;
 pub use idt::common::X86ExceptionContext;
 pub use irq_state::{irqs_disabled, irqs_enabled, IrqGuard, IrqState};
 pub use percpu::{irq_nesting_count, irqs_disable, irqs_enable};
