@@ -26,6 +26,7 @@ use svsm::cpu::percpu::current_ghcb;
 use svsm::cpu::percpu::PerCpu;
 use svsm::cpu::percpu::{this_cpu, this_cpu_shared};
 use svsm::cpu::smp::start_secondary_cpus;
+use svsm::cpu::HostApic;
 use svsm::debug::gdbstub::svsm_gdbstub::{debug_break, gdbstub_start};
 use svsm::debug::stacktrace::print_stack;
 use svsm::error::SvsmError;
@@ -427,6 +428,10 @@ pub extern "C" fn svsm_main() {
     }
 
     log::info!("{} CPU(s) present", nr_cpus);
+
+    // Start an APIC timer for testing interrupts/restricted injection
+    HostApic::enable().expect("Failed to enable APIC");
+    HostApic::enable_timer(0xa0000000, true).expect("Failed to start APIC timer");
 
     start_secondary_cpus(platform, &cpus);
 
